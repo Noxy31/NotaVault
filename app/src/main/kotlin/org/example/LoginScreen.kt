@@ -272,28 +272,6 @@ fun LoginScreen(
                                 enabled = !isLoading
                             )
                             
-                            // Option "Se souvenir de moi"
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.Start,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                var rememberMe by remember { mutableStateOf(false) }
-                                Checkbox(
-                                    checked = rememberMe,
-                                    onCheckedChange = { rememberMe = it },
-                                    colors = CheckboxDefaults.colors(
-                                        checkedColor = MaterialTheme.colors.primary,
-                                        uncheckedColor = Color.Gray
-                                    ),
-                                    enabled = !isLoading
-                                )
-                                Text(
-                                    text = "Se souvenir de moi",
-                                    color = Color.White.copy(alpha = 0.7f)
-                                )
-                            }
-                            
                             // Message d'erreur
                             AnimatedVisibility(
                                 visible = errorMessage.isNotEmpty(),
@@ -428,6 +406,8 @@ private fun attemptLogin(
             // Vérifier le résultat
             if (user != null) {
                 // Authentification réussie
+                // Important: Stocker l'utilisateur dans le UserManager
+                UserManager.setCurrentUser(user)
                 onSuccess()
             } else {
                 // Échec de l'authentification

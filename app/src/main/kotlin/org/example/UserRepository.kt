@@ -13,7 +13,6 @@ import kotlin.random.asKotlinRandom
  * Repository pour gérer les opérations liées aux utilisateurs dans la base de données
  */
 class UserRepository {
-    // Initialiser Argon2 pour le hachage de mot de passe
     private val argon2: Argon2 = Argon2Factory.create(
         Argon2Factory.Argon2Types.ARGON2id, // Type d'Argon2 (id est le plus recommandé)
         16,  // Salt length
@@ -92,28 +91,22 @@ class UserRepository {
         val db = Database.connect()
         
         try {
-            // Vérifier si le nom d'utilisateur existe déjà
             if (usernameExists(username)) {
                 return Pair(null, "Ce nom d'utilisateur existe déjà.")
             }
             
-            // Générer la phrase secrète
             val secretSentence = generateSecretSentence()
             
-            // Hasher le mot de passe et la phrase secrète avec Argon2
             val hashedPassword = hashWithArgon2(password)
             val hashedSecretSentence = hashWithArgon2(secretSentence)
             
-            // Insérer le nouvel utilisateur
             val insertedId = db.insert(Users) {
                 set(it.userLogin, username)
                 set(it.userPassword, hashedPassword)
                 set(it.userSecretSentence, hashedSecretSentence)
             }
             
-            // Vérifier si l'insertion a réussi
             if (insertedId > 0) {
-                // Récupérer l'utilisateur créé
                 val newUser = db.sequenceOf(Users)
                     .firstOrNull { it.idUser eq insertedId.toInt() }
                 
@@ -139,19 +132,15 @@ class UserRepository {
         val db = Database.connect()
         
         try {
-            // Récupérer l'utilisateur
             val user = db.sequenceOf(Users)
                 .firstOrNull { it.userLogin eq username }
             
             if (user != null) {
-                // Vérifier la phrase secrète
                 val secretMatches = argon2.verify(user.userSecretSentence, secretSentence.toCharArray())
                 
                 if (secretMatches) {
-                    // Hasher le nouveau mot de passe
                     val hashedPassword = hashWithArgon2(newPassword)
                     
-                    // Mettre à jour le mot de passe
                     db.update(Users) {
                         set(it.userPassword, hashedPassword)
                         where { it.idUser eq user.idUser }

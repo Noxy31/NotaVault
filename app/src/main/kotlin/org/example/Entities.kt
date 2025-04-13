@@ -29,12 +29,14 @@ interface Color : Entity<Color> {
     companion object : Entity.Factory<Color>()
     val idColor: Int
     var colorName: String
+    var colorHexa: String
 }
 
 // Table Ktorm pour Colors
 object Colors : Table<Color>("colors") {
     val idColor = int("idColor").primaryKey().bindTo { it.idColor }
     val colorName = varchar("color_name").bindTo { it.colorName }
+    val colorHexa = varchar("color_hexa").bindTo { it.colorHexa }
 }
 
 // Entité Note
