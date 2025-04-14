@@ -9,6 +9,8 @@ import org.example.entities.Colors
 import org.ktorm.dsl.*
 import org.ktorm.entity.*
 import java.time.LocalDateTime
+import java.time.ZonedDateTime
+import java.time.ZoneId
 
 /**
  * Repository pour gérer les opérations liées aux notes dans la base de données
@@ -28,8 +30,6 @@ class NoteRepository {
      * @param user L'utilisateur connecté
      */
     fun setEncryptionKey(user: User) {
-        // Utiliser une combinaison unique de l'identifiant de l'utilisateur et de son nom d'utilisateur
-        // Dans une application réelle, on pourrait dériver cette clé du mot de passe de l'utilisateur
         encryptionKey = user.userLogin + "_" + user.idUser + "_secureKey"
     }
     
@@ -88,11 +88,10 @@ class NoteRepository {
             
             val encryptedTitle = encryptWithAES(title)
             val encryptedContent = encryptWithAES(content)
-            val now = LocalDateTime.now()
+            val now = LocalDateTime.now(ZoneId.systemDefault())
             
             println("Titre chiffré: ${encryptedTitle.take(20)}...")
             
-            // Utiliser Notes.xxx au lieu de it.xxx
             val insertedId = db.insert(Notes) {
                 set(Notes.noteTitle, encryptedTitle)
                 set(Notes.noteContent, encryptedContent)
@@ -138,7 +137,6 @@ class NoteRepository {
             db.update(Notes) {
                 where { it.idNote eq noteId }
                 
-                // Utiliser Notes.xxx au lieu de it.xxx et renommer les variables de boucle
                 title?.let { titleValue ->
                     set(Notes.noteTitle, encryptWithAES(titleValue))
                 }
@@ -211,7 +209,6 @@ fun getAvailableColors(): List<org.example.entities.Color> {
         val colors = db.sequenceOf(Colors).toList()
         println("DEBUG: ${colors.size} couleurs récupérées")
         
-        // Vérification des couleurs récupérées
         colors.forEach { color ->
             println("DEBUG: Couleur récupérée: ID=${color.idColor}, Nom=${color.colorName}, Hexa=${color.colorHexa}")
         }
@@ -243,8 +240,6 @@ fun getAvailableColors(): List<org.example.entities.Color> {
         } catch (e: Exception) {
             println("Erreur lors du déchiffrement de la note: ${e.message}")
             e.printStackTrace()
-            // En cas d'erreur, retourner du contenu vide mais pas null
-            // pour éviter les plantages dans l'interface
             return Pair("", "")
         }
     }
