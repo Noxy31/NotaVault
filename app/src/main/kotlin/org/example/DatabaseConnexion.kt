@@ -29,7 +29,8 @@ object Database {
                     url = DB_URL,
                     user = DB_USER,
                     password = DB_PASSWORD,
-                    logger = ConsoleLogger(LogLevel.DEBUG)
+                    logger = ConsoleLogger(LogLevel.DEBUG),
+        
                 )
                 
                 println("Connexion à la base de données réussie!")

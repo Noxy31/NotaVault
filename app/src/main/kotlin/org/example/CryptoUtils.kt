@@ -119,4 +119,104 @@ object CryptoUtils {
             return ""
         }
     }
+    
+    /**
+     * Chiffre des données binaires (images, fichiers, etc.) avec AES-GCM
+     * @param data Données binaires à chiffrer
+     * @param password Mot de passe ou clé de chiffrement
+     * @return Objet contenant les données chiffrées et le sel/IV nécessaires pour le déchiffrement
+     */
+    fun encryptBinary(data: ByteArray, password: String): EncryptedBinaryData {
+        try {
+            // Génère un sel aléatoire
+            val random = SecureRandom()
+            val salt = ByteArray(SALT_LENGTH)
+            random.nextBytes(salt)
+            
+            // Génère un IV (vecteur d'initialisation) aléatoire
+            val iv = ByteArray(IV_LENGTH)
+            random.nextBytes(iv)
+            
+            // Dérive une clé à partir du mot de passe et du sel
+            val key = deriveKey(password, salt)
+            
+            // Initialise le chiffrement
+            val cipher = Cipher.getInstance(ALGORITHM)
+            val parameterSpec = GCMParameterSpec(GCM_TAG_LENGTH, iv)
+            cipher.init(Cipher.ENCRYPT_MODE, key, parameterSpec)
+            
+            // Chiffre les données
+            val encryptedData = cipher.doFinal(data)
+            
+            // Convertit le sel et l'IV en chaînes hexadécimales pour stockage en BDD
+            val saltHex = salt.joinToString("") { "%02x".format(it) }
+            val ivHex = iv.joinToString("") { "%02x".format(it) }
+            
+            return EncryptedBinaryData(encryptedData, saltHex, ivHex)
+        } catch (e: Exception) {
+            println("Erreur lors du chiffrement binaire: ${e.message}")
+            e.printStackTrace()
+            throw e
+        }
+    }
+    
+    /**
+     * Déchiffre des données binaires (images, fichiers, etc.) avec AES-GCM
+     * @param encryptedData Données chiffrées
+     * @param saltHex Sel en format hexadécimal
+     * @param ivHex IV en format hexadécimal
+     * @param password Mot de passe ou clé de chiffrement
+     * @return Données binaires déchiffrées
+     */
+    fun decryptBinary(encryptedData: ByteArray, saltHex: String, ivHex: String, password: String): ByteArray {
+        try {
+            // Convertit les chaînes hexadécimales en tableaux d'octets
+            val salt = saltHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+            val iv = ivHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+            
+            // Dérive la clé à partir du mot de passe et du sel
+            val key = deriveKey(password, salt)
+            
+            // Initialise le déchiffrement
+            val cipher = Cipher.getInstance(ALGORITHM)
+            val parameterSpec = GCMParameterSpec(GCM_TAG_LENGTH, iv)
+            cipher.init(Cipher.DECRYPT_MODE, key, parameterSpec)
+            
+            // Déchiffre et retourne
+            return cipher.doFinal(encryptedData)
+        } catch (e: Exception) {
+            println("Erreur lors du déchiffrement binaire: ${e.message}")
+            e.printStackTrace()
+            throw RuntimeException("Impossible de déchiffrer les données: ${e.message}")
+        }
+    }
+    
+    /**
+     * Classe pour stocker les données chiffrées et les paramètres nécessaires au déchiffrement
+     */
+    data class EncryptedBinaryData(
+        val encryptedData: ByteArray,
+        val saltHex: String,
+        val ivHex: String
+    ) {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (javaClass != other?.javaClass) return false
+            
+            other as EncryptedBinaryData
+            
+            if (!encryptedData.contentEquals(other.encryptedData)) return false
+            if (saltHex != other.saltHex) return false
+            if (ivHex != other.ivHex) return false
+            
+            return true
+        }
+        
+        override fun hashCode(): Int {
+            var result = encryptedData.contentHashCode()
+            result = 31 * result + saltHex.hashCode()
+            result = 31 * result + ivHex.hashCode()
+            return result
+        }
+    }
 }

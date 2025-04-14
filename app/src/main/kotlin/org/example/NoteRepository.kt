@@ -89,7 +89,8 @@ class NoteRepository {
             val encryptedTitle = encryptWithAES(title)
             val encryptedContent = encryptWithAES(content)
             val now = LocalDateTime.now(ZoneId.systemDefault())
-            
+            println(ZoneId.systemDefault())
+            println("Date actuelle: $now")
             println("Titre chiffré: ${encryptedTitle.take(20)}...")
             
             val insertedId = db.insert(Notes) {

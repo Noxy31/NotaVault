@@ -1,10 +1,10 @@
 package org.example.entities
-
 import org.ktorm.entity.Entity
 import org.ktorm.schema.Table
 import org.ktorm.schema.int
 import org.ktorm.schema.varchar
 import org.ktorm.schema.datetime
+import org.ktorm.schema.blob
 import java.time.LocalDateTime
 
 // Entité User
@@ -62,4 +62,29 @@ object Notes : Table<Note>("notes") {
     val noteDeleteDate = datetime("note_delete_date").bindTo { it.noteDeleteDate }
     val idColor = int("idColor").references(Colors) { it.color }
     val idUser = int("idUser").references(Users) { it.user }
+}
+
+// Entité Image
+interface Image : Entity<Image> {
+    companion object : Entity.Factory<Image>()
+    val idImage: Int
+    var imageName: String
+    var imageData: ByteArray
+    var imageSalt: String
+    var imageIv: String
+    var imageMimeType: String
+    var imageCreationDate: LocalDateTime
+    var user: User
+}
+
+// Table Ktorm pour Images
+object Images : Table<Image>("images") {
+    val idImage = int("id_image").primaryKey().bindTo { it.idImage }
+    val imageName = varchar("image_name").bindTo { it.imageName }
+    val imageData = blob("image_data").bindTo { it.imageData }
+    val imageSalt = varchar("image_salt").bindTo { it.imageSalt }
+    val imageIv = varchar("image_iv").bindTo { it.imageIv }
+    val imageMimeType = varchar("image_mime_type").bindTo { it.imageMimeType }
+    val imageCreationDate = datetime("image_creation_date").bindTo { it.imageCreationDate }
+    val idUser = int("id_user").references(Users) { it.user }
 }

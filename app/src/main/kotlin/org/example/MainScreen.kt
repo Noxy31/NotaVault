@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.*
 import org.example.entities.Note
 import org.example.entities.User
-import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 @Composable
 fun MainScreen(
@@ -43,11 +43,18 @@ fun MainScreen(
     var editorTitle by remember { mutableStateOf(TextFieldValue("")) }
     var editorContent by remember { mutableStateOf(TextFieldValue("")) }
     
+    // Pour suivre si des modifications ont été apportées depuis la dernière sauvegarde
+    var noteModified by remember { mutableStateOf(false) }
+    
+    // Pour stocker le dernier contenu sauvegardé
+    var lastSavedTitle by remember { mutableStateOf("") }
+    var lastSavedContent by remember { mutableStateOf("") }
+    
     // État pour le terme de recherche
     var searchQuery by remember { mutableStateOf("") }
     
-    // État pour le job de sauvegarde automatique
-    var autoSaveJob by remember { mutableStateOf<Job?>(null) }
+    // État pour le job de sauvegarde automatique avec debounce
+    var debounceJob by remember { mutableStateOf<Job?>(null) }
     
     // Obtenir toutes les couleurs disponibles
     var availableColors by remember { mutableStateOf(emptyList<org.example.entities.Color>()) }
@@ -127,7 +134,33 @@ fun MainScreen(
                 }
             }
             isSaving = false
+            
+            // Mettre à jour les variables de suivi après la sauvegarde
+            lastSavedTitle = title
+            lastSavedContent = content
+            noteModified = false
+            
             onComplete()
+        }
+    }
+    
+    // Fonction pour déclencher une sauvegarde avec debounce
+    fun triggerDebounceAutosave() {
+        if (selectedNote == null || !noteModified) return
+        
+        // Annuler le job précédent si toujours actif
+        debounceJob?.cancel()
+        
+        // Créer un nouveau job qui attendra 3 secondes avant de sauvegarder
+        debounceJob = coroutineScope.launch {
+            delay(3.seconds)
+            saveCurrentNote(selectedNote!!, editorTitle.text, editorContent.text) {
+                statusMessage = "Auto-sauvegarde effectuée"
+                coroutineScope.launch {
+                    delay(2000)
+                    statusMessage = null
+                }
+            }
         }
     }
     
@@ -195,11 +228,16 @@ fun MainScreen(
                             onNoteSelected = { note ->
                                 // Sauvegarder les modifications de la note actuellement ouverte
                                 if (selectedNote != null && (selectedNote!!.idNote != note.idNote)) {
-                                    saveCurrentNote(selectedNote!!, editorTitle.text, editorContent.text) {
-                                        statusMessage = "Note sauvegardée"
-                                        coroutineScope.launch {
-                                            delay(2000)
-                                            statusMessage = null
+                                    // Annuler le job de debounce en cours
+                                    debounceJob?.cancel()
+                                    
+                                    if (noteModified) {
+                                        saveCurrentNote(selectedNote!!, editorTitle.text, editorContent.text) {
+                                            statusMessage = "Note sauvegardée"
+                                            coroutineScope.launch {
+                                                delay(2000)
+                                                statusMessage = null
+                                            }
                                         }
                                     }
                                 }
@@ -211,21 +249,11 @@ fun MainScreen(
                                     editorTitle = TextFieldValue(decrypted.first)
                                     editorContent = TextFieldValue(decrypted.second)
                                     selectedColor = note.color
-                                }
-                                
-                                // Démarrer le job de sauvegarde automatique
-                                autoSaveJob?.cancel()
-                                autoSaveJob = coroutineScope.launch {
-                                    while (isActive) {
-                                        delay(1.minutes)
-                                        saveCurrentNote(note, editorTitle.text, editorContent.text) {
-                                            statusMessage = "Auto-sauvegarde effectuée"
-                                            coroutineScope.launch {
-                                                delay(2000)
-                                                statusMessage = null
-                                            }
-                                        }
-                                    }
+                                    
+                                    // Initialiser les variables de suivi des modifications
+                                    lastSavedTitle = decrypted.first
+                                    lastSavedContent = decrypted.second
+                                    noteModified = false
                                 }
                                 
                                 if (!isTabletOrDesktop) {
@@ -252,28 +280,20 @@ fun MainScreen(
                                                 println("DEBUG: Note créée avec succès, refreshNotes()")
                                                 refreshNotes()
 
+                                                // Annuler le job de debounce en cours si présent
+                                                debounceJob?.cancel()
+
                                                 // Sélectionner automatiquement la nouvelle note
                                                 println("DEBUG: Sélection de la nouvelle note")
                                                 selectedNote = newNote
                                                 editorTitle = TextFieldValue("Nouvelle note")
                                                 editorContent = TextFieldValue("")
                                                 selectedColor = availableColors.find { it.idColor == 6 }  // Facultatif : pour afficher la bonne couleur dans l'UI
-
-                                                // Démarrer le job de sauvegarde automatique
-                                                println("DEBUG: Configuration de l'auto-save")
-                                                autoSaveJob?.cancel()
-                                                autoSaveJob = coroutineScope.launch {
-                                                    while (isActive) {
-                                                        delay(1.minutes)
-                                                        saveCurrentNote(newNote, editorTitle.text, editorContent.text) {
-                                                            statusMessage = "Auto-sauvegarde effectuée"
-                                                            coroutineScope.launch {
-                                                                delay(2000)
-                                                                statusMessage = null
-                                                            }
-                                                        }
-                                                    }
-                                                }
+                                                
+                                                // Initialiser les variables de suivi des modifications pour la nouvelle note
+                                                lastSavedTitle = "Nouvelle note"
+                                                lastSavedContent = ""
+                                                noteModified = false
 
                                                 // Fermer le panneau latéral sur mobile
                                                 if (!isTabletOrDesktop) {
@@ -317,15 +337,18 @@ fun MainScreen(
                                                 selectedNote = null
                                                 editorTitle = TextFieldValue("")
                                                 editorContent = TextFieldValue("")
-                                                autoSaveJob?.cancel()
+                                                debounceJob?.cancel()
+                                                noteModified = false
                                             }
                                         }
                                     }
                                 }
                             },
                             onLogout = {
-                                autoSaveJob?.cancel()
-                                if (selectedNote != null) {
+                                // Annuler le job de debounce en cours
+                                debounceJob?.cancel()
+                                
+                                if (selectedNote != null && noteModified) {
                                     saveCurrentNote(selectedNote!!, editorTitle.text, editorContent.text) {
                                         onLogout()
                                     }
@@ -364,9 +387,39 @@ fun MainScreen(
                         if (selectedNote != null) {
                             NoteEditor(
                                 title = editorTitle,
-                                onTitleChange = { editorTitle = it },
+                                onTitleChange = { 
+                                    editorTitle = it 
+                                    // Vérifier s'il y a eu une modification
+                                    val wasModified = noteModified
+                                    noteModified = editorTitle.text != lastSavedTitle || editorContent.text != lastSavedContent
+                                    
+                                    // Si l'état est passé de non-modifié à modifié, déclencher un debounce
+                                    if (noteModified && !wasModified) {
+                                        println("DEBUG: Contenu modifié, préparation de l'auto-sauvegarde")
+                                    }
+                                    
+                                    // Déclencher le debounce à chaque modification
+                                    if (noteModified) {
+                                        triggerDebounceAutosave()
+                                    }
+                                },
                                 content = editorContent,
-                                onContentChange = { editorContent = it },
+                                onContentChange = { 
+                                    editorContent = it 
+                                    // Vérifier s'il y a eu une modification
+                                    val wasModified = noteModified
+                                    noteModified = editorTitle.text != lastSavedTitle || editorContent.text != lastSavedContent
+                                    
+                                    // Si l'état est passé de non-modifié à modifié, déclencher un debounce
+                                    if (noteModified && !wasModified) {
+                                        println("DEBUG: Contenu modifié, préparation de l'auto-sauvegarde")
+                                    }
+                                    
+                                    // Déclencher le debounce à chaque modification
+                                    if (noteModified) {
+                                        triggerDebounceAutosave()
+                                    }
+                                },
                                 noteColor = selectedColor,
                                 availableColors = availableColors,
                                 onColorChange = { newColor ->
@@ -386,6 +439,9 @@ fun MainScreen(
                                     }
                                 },
                                 onSave = {
+                                    // Annuler tout debounce en cours
+                                    debounceJob?.cancel()
+                                    
                                     saveCurrentNote(selectedNote!!, editorTitle.text, editorContent.text) {
                                         statusMessage = "Note sauvegardée"
                                         coroutineScope.launch {

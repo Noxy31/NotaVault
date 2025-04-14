@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.sp
 import org.example.entities.Note
 import org.example.entities.User
 import java.time.format.DateTimeFormatter
+import java.time.ZoneId
+import java.time.ZoneOffset
 
 /**
  * Panneau latéral avec la liste des notes et la barre de recherche
@@ -38,6 +40,7 @@ fun SidebarPanel(
     onNewNote: () -> Unit,
     onDeleteNote: (Note) -> Unit,
     onLogout: () -> Unit,
+    onOpenVault: () -> Unit,
     currentUser: User
 ) {
     Column(
@@ -83,7 +86,6 @@ fun SidebarPanel(
                 .padding(bottom = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Avatar basé sur les initiales de l'utilisateur
             Box(
                 modifier = Modifier
                     .size(36.dp)
@@ -145,7 +147,6 @@ fun SidebarPanel(
             shape = RoundedCornerShape(8.dp)
         )
         
-        // En-tête des notes avec le bouton pour ajouter une nouvelle note
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -160,17 +161,56 @@ fun SidebarPanel(
                 color = Color.White
             )
             
-            IconButton(
-                onClick = onNewNote,
-                modifier = Modifier
-                    .size(36.dp)
-                    .background(MaterialTheme.colors.primary, CircleShape)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.End,
+                modifier = Modifier.wrapContentWidth()
             ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Nouvelle note",
-                    tint = Color.White
-                )
+                // Bouton Vault - coffre-fort d'images
+                Button(
+                    onClick = onOpenVault,
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF4B4B63)
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp),
+                    modifier = Modifier
+                        .height(30.dp)
+                        .padding(end = 8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Photo,
+                            contentDescription = "Coffre d'images",
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "Vault",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+                
+                // Bouton Ajouter note (plus petit)
+                IconButton(
+                    onClick = onNewNote,
+                    modifier = Modifier
+                        .size(30.dp)
+                        .background(MaterialTheme.colors.primary, CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Nouvelle note",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
         }
         
@@ -230,12 +270,18 @@ fun NoteItem(
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
+    // Création d'un formateur avec le fuseau horaire local
     val dateFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")
-    val formattedDate = note.noteUpdateDate?.format(dateFormatter) ?: note.noteCreationDate.format(dateFormatter)
+        .withZone(ZoneId.systemDefault())
+    
+    // Convertir la date UTC de la base de données au fuseau horaire local
+    val noteDate = note.noteUpdateDate ?: note.noteCreationDate
+    val localDateTime = noteDate.atZone(ZoneOffset.UTC).withZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime()
+    val formattedDate = localDateTime.format(dateFormatter)
     
     // Obtenir la couleur de la note avec une opacité réduite pour le fond
     val noteColor = getColorFromName(note.color.colorName).copy(alpha = 0.25f)
-    val textColor = Color.White // Garder le texte blanc pour assurer la lisibilité
+    val textColor = Color.White
     
     Card(
         modifier = Modifier
@@ -294,5 +340,5 @@ fun NoteItem(
                 )
             }
         }
-    }
+    } 
 }
