@@ -181,6 +181,21 @@ class NoteRepository {
             return false
         }
     }
+
+    fun getNotesByColor(userId: Int, colorId: Int): List<Note> {
+    val db = Database.connect()
+    
+    try {
+        return db.sequenceOf(Notes)
+            .filter { (it.idUser eq userId) and (it.idColor eq colorId) and it.noteDeleteDate.isNull() }
+            .sortedByDescending { it.noteCreationDate }
+            .toList()
+    } catch (e: Exception) {
+        println("Erreur lors de la récupération des notes par couleur: ${e.message}")
+        e.printStackTrace()
+        return emptyList()
+    }
+}
     
     /**
      * Récupère une note par son ID

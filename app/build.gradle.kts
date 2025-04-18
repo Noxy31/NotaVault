@@ -19,7 +19,10 @@ dependencies {
     implementation(compose.foundation)
     implementation(compose.ui)
     implementation(compose.preview)
-    
+
+    implementation(compose.runtime)
+    implementation("org.jetbrains.skiko:skiko:0.7.85")
+    implementation("org.jetbrains.compose.ui:ui-graphics:1.5.11")
     // Autres dépendances pour ta logique métier et tests
     implementation("org.ktorm:ktorm-core:3.5.0")
     implementation("org.ktorm:ktorm-support-mysql:3.5.0")

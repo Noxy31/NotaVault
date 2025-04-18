@@ -1,60 +1,31 @@
 package org.example
 
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
+import org.example.entities.Image
+import org.example.entities.Images
 import org.example.entities.User
+import org.example.entities.Users
+import org.ktorm.entity.sequenceOf
+import org.ktorm.entity.toList
+import org.ktorm.entity.filter
+import org.ktorm.entity.sortedByDescending
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import org.jetbrains.skia.Image as SkiaImage
 import java.io.ByteArrayOutputStream
 import java.time.LocalDateTime
 import javax.imageio.ImageIO
 import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
-import kotlin.concurrent.thread
+import org.ktorm.dsl.*
 
-/**
- * Structure pour représenter une image dans le coffre
- */
-data class VaultImage(
-    val idImage: Int,
-    val imageName: String,
-    val thumbnailData: ByteArray? = null,  // Miniature déchiffrée pour l'affichage rapide
-    val mimeType: String,
-    val creationDate: LocalDateTime,
-    // Ne stocke pas l'image complète déchiffrée ici pour économiser la mémoire
-) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-
-        other as VaultImage
-
-        if (idImage != other.idImage) return false
-        if (imageName != other.imageName) return false
-        if (thumbnailData != null) {
-            if (other.thumbnailData == null) return false
-            if (!thumbnailData.contentEquals(other.thumbnailData)) return false
-        } else if (other.thumbnailData != null) return false
-        if (mimeType != other.mimeType) return false
-        if (creationDate != other.creationDate) return false
-
-        return true
-    }
-
-    override fun hashCode(): Int {
-        var result = idImage
-        result = 31 * result + imageName.hashCode()
-        result = 31 * result + (thumbnailData?.contentHashCode() ?: 0)
-        result = 31 * result + mimeType.hashCode()
-        result = 31 * result + creationDate.hashCode()
-        return result
-    }
-}
 
 /**
  * Repository pour gérer les images du coffre-fort
  */
 class ImageRepository {
     private var encryptionKey: String? = null
+    
+    // Au lieu de créer une nouvelle connexion, utilisez celle déjà configurée
     private val database = Database.connect()
     
     // Configuration de la taille des miniatures
@@ -133,55 +104,23 @@ class ImageRepository {
         
         try {
             // Créer une miniature
-            val thumbnail = createThumbnail(imageData, mimeType)
+            // val thumbnail = createThumbnail(imageData, mimeType)
             
-            // Chiffrer l'image et la miniature
+            // Chiffrer l'image
             val encryptedImage = CryptoUtils.encryptBinary(imageData, encryptionKey!!)
-            val encryptedThumbnail = thumbnail?.let { CryptoUtils.encryptBinary(it, encryptionKey!!) }
             
-            // Insertion en base de données
-            return database.useConnection { conn ->
-                val sql = """
-                    INSERT INTO images (
-                        id_user, image_name, image_data, image_salt, image_iv, 
-                        thumbnail_data, thumbnail_salt, thumbnail_iv, image_mime_type
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """
-                
-                val stmt = conn.prepareStatement(sql, java.sql.Statement.RETURN_GENERATED_KEYS)
-                
-                // Paramètres
-                var index = 1
-                stmt.setInt(index++, userId)
-                stmt.setString(index++, imageName)
-                stmt.setBytes(index++, encryptedImage.encryptedData)
-                stmt.setString(index++, encryptedImage.saltHex)
-                stmt.setString(index++, encryptedImage.ivHex)
-                
-                if (encryptedThumbnail != null) {
-                    stmt.setBytes(index++, encryptedThumbnail.encryptedData)
-                    stmt.setString(index++, encryptedThumbnail.saltHex)
-                    stmt.setString(index++, encryptedThumbnail.ivHex)
-                } else {
-                    stmt.setNull(index++, java.sql.Types.BLOB)
-                    stmt.setNull(index++, java.sql.Types.VARCHAR)
-                    stmt.setNull(index++, java.sql.Types.VARCHAR)
-                }
-                
-                stmt.setString(index, mimeType)
-                
-                // Exécuter l'insertion
-                val rowsAffected = stmt.executeUpdate()
-                if (rowsAffected > 0) {
-                    // Récupérer l'ID généré
-                    val rs = stmt.generatedKeys
-                    if (rs.next()) {
-                        return@useConnection rs.getInt(1)
-                    }
-                }
-                
-                return@useConnection null
-            }
+            // Insérer dans la base de données
+            val generatedId = database.insertAndGenerateKey(Images) {
+                set(it.imageName, imageName)
+                set(it.imageData, encryptedImage.encryptedData)
+                set(it.imageSalt, encryptedImage.saltHex)
+                set(it.imageIv, encryptedImage.ivHex)
+                set(it.imageMimeType, mimeType)
+                set(it.imageCreationDate, LocalDateTime.now())
+                set(it.idUser, userId)
+            } as Int?
+            
+            return generatedId
         } catch (e: Exception) {
             println("Erreur lors de la sauvegarde de l'image: ${e.message}")
             e.printStackTrace()
@@ -190,74 +129,27 @@ class ImageRepository {
     }
     
     /**
-     * Récupérer la liste des images du coffre pour un utilisateur (avec miniatures uniquement)
+     * Récupérer la liste des images du coffre pour un utilisateur
      */
-    fun getUserImages(userId: Int): List<VaultImage> {
+      fun getUserImages(userId: Int): List<Image> {
         if (encryptionKey == null) {
             throw IllegalStateException("Clé de chiffrement non définie")
         }
         
-        val images = mutableListOf<VaultImage>()
-        
         try {
-            database.useConnection { conn ->
-                val sql = """
-                    SELECT id_image, image_name, thumbnail_data, thumbnail_salt, thumbnail_iv,
-                           image_mime_type, image_creation_date
-                    FROM images
-                    WHERE id_user = ?
-                    ORDER BY image_creation_date DESC
-                """
-                
-                val stmt = conn.prepareStatement(sql)
-                stmt.setInt(1, userId)
-                
-                val rs = stmt.executeQuery()
-                while (rs.next()) {
-                    val idImage = rs.getInt("id_image")
-                    val imageName = rs.getString("image_name")
-                    val mimeType = rs.getString("image_mime_type")
-                    val creationDate = rs.getTimestamp("image_creation_date").toLocalDateTime()
-                    
-                    // Déchiffrer la miniature si disponible
-                    var thumbnailData: ByteArray? = null
-                    val encryptedThumbnail = rs.getBytes("thumbnail_data")
-                    
-                    if (encryptedThumbnail != null && !rs.wasNull()) {
-                        val thumbnailSalt = rs.getString("thumbnail_salt")
-                        val thumbnailIv = rs.getString("thumbnail_iv")
-                        
-                        try {
-                            thumbnailData = CryptoUtils.decryptBinary(
-                                encryptedThumbnail, thumbnailSalt, thumbnailIv, encryptionKey!!
-                            )
-                        } catch (e: Exception) {
-                            println("Erreur lors du déchiffrement de la miniature: ${e.message}")
-                            // Continuer sans miniature en cas d'erreur
-                        }
-                    }
-                    
-                    images.add(
-                        VaultImage(
-                            idImage = idImage,
-                            imageName = imageName,
-                            thumbnailData = thumbnailData,
-                            mimeType = mimeType,
-                            creationDate = creationDate
-                        )
-                    )
-                }
-            }
+            return database.sequenceOf(Images)
+                .filter { it.idUser eq userId }
+                .sortedByDescending { it.imageCreationDate }
+                .toList()
         } catch (e: Exception) {
             println("Erreur lors de la récupération des images: ${e.message}")
             e.printStackTrace()
+            return emptyList()
         }
-        
-        return images
     }
     
     /**
-     * Récupérer une image complète
+     * Récupérer une image complète (déchiffrée)
      */
     fun getImageData(imageId: Int): ByteArray? {
         if (encryptionKey == null) {
@@ -265,37 +157,32 @@ class ImageRepository {
         }
         
         try {
-            database.useConnection { conn ->
-                val sql = """
-                    SELECT image_data, image_salt, image_iv
-                    FROM images
-                    WHERE id_image = ?
-                """
-                
-                val stmt = conn.prepareStatement(sql)
-                stmt.setInt(1, imageId)
-                
-                val rs = stmt.executeQuery()
-                if (rs.next()) {
-                    val encryptedData = rs.getBytes("image_data")
-                    val salt = rs.getString("image_salt")
-                    val iv = rs.getString("image_iv")
+            val result = database.from(Images)
+                .select(Images.imageData, Images.imageSalt, Images.imageIv)
+                .where { Images.idImage eq imageId }
+                .map { row ->
+                    val encryptedData = row[Images.imageData]
+                    val salt = row[Images.imageSalt]
+                    val iv = row[Images.imageIv]
                     
-                    return@useConnection CryptoUtils.decryptBinary(
-                        encryptedData, salt, iv, encryptionKey!!
-                    )
+                    if (encryptedData != null && salt != null && iv != null) {
+                        CryptoUtils.decryptBinary(encryptedData, salt, iv, encryptionKey!!)
+                    } else {
+                        null
+                    }
                 }
-            }
+                .firstOrNull()
+            
+            return result
         } catch (e: Exception) {
             println("Erreur lors de la récupération de l'image: ${e.message}")
             e.printStackTrace()
+            return null
         }
-        
-        return null
     }
     
     /**
-     * Récupérer la miniature d'une image
+     * Récupérer la miniature d'une image (déchiffrée à la volée)
      */
     fun getImageThumbnail(imageId: Int): ByteArray? {
         if (encryptionKey == null) {
@@ -303,35 +190,30 @@ class ImageRepository {
         }
         
         try {
-            database.useConnection { conn ->
-                val sql = """
-                    SELECT thumbnail_data, thumbnail_salt, thumbnail_iv
-                    FROM images
-                    WHERE id_image = ?
-                """
-                
-                val stmt = conn.prepareStatement(sql)
-                stmt.setInt(1, imageId)
-                
-                val rs = stmt.executeQuery()
-                if (rs.next()) {
-                    val encryptedThumbnail = rs.getBytes("thumbnail_data")
-                    if (encryptedThumbnail != null && !rs.wasNull()) {
-                        val thumbnailSalt = rs.getString("thumbnail_salt")
-                        val thumbnailIv = rs.getString("thumbnail_iv")
-                        
-                        return@useConnection CryptoUtils.decryptBinary(
-                            encryptedThumbnail, thumbnailSalt, thumbnailIv, encryptionKey!!
-                        )
+            val result = database.from(Images)
+                .select(Images.imageData, Images.imageSalt, Images.imageIv, Images.imageMimeType)
+                .where { Images.idImage eq imageId }
+                .map { row ->
+                    val encryptedData = row[Images.imageData]
+                    val salt = row[Images.imageSalt]
+                    val iv = row[Images.imageIv]
+                    val mimeType = row[Images.imageMimeType]
+                    
+                    if (encryptedData != null && salt != null && iv != null && mimeType != null) {
+                        val imageData = CryptoUtils.decryptBinary(encryptedData, salt, iv, encryptionKey!!)
+                        createThumbnail(imageData, mimeType)
+                    } else {
+                        null
                     }
                 }
-            }
+                .firstOrNull()
+            
+            return result
         } catch (e: Exception) {
             println("Erreur lors de la récupération de la miniature: ${e.message}")
             e.printStackTrace()
+            return null
         }
-        
-        return null
     }
     
     /**
@@ -339,14 +221,8 @@ class ImageRepository {
      */
     fun deleteImage(imageId: Int): Boolean {
         try {
-            database.useConnection { conn ->
-                val sql = "DELETE FROM images WHERE id_image = ?"
-                
-                val stmt = conn.prepareStatement(sql)
-                stmt.setInt(1, imageId)
-                
-                return@useConnection stmt.executeUpdate() > 0
-            }
+            val affectedRows = database.delete(Images) { it.idImage eq imageId }
+            return affectedRows > 0
         } catch (e: Exception) {
             println("Erreur lors de la suppression de l'image: ${e.message}")
             e.printStackTrace()
@@ -362,7 +238,7 @@ class ImageRepository {
         
         try {
             val skiaImage = SkiaImage.makeFromEncoded(thumbnailData)
-            return skiaImage.asImageBitmap()
+            return skiaImage.toComposeImageBitmap()
         } catch (e: Exception) {
             println("Erreur lors de la conversion de la miniature en ImageBitmap: ${e.message}")
             e.printStackTrace()
@@ -375,15 +251,11 @@ class ImageRepository {
      */
     fun renameImage(imageId: Int, newName: String): Boolean {
         try {
-            database.useConnection { conn ->
-                val sql = "UPDATE images SET image_name = ? WHERE id_image = ?"
-                
-                val stmt = conn.prepareStatement(sql)
-                stmt.setString(1, newName)
-                stmt.setInt(2, imageId)
-                
-                return@useConnection stmt.executeUpdate() > 0
+            val affectedRows = database.update(Images) {
+                set(it.imageName, newName)
+                where { it.idImage eq imageId }
             }
+            return affectedRows > 0
         } catch (e: Exception) {
             println("Erreur lors du renommage de l'image: ${e.message}")
             e.printStackTrace()

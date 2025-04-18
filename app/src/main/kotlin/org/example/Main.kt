@@ -13,7 +13,7 @@ fun main() = application {
     
     Window(
         onCloseRequest = ::exitApplication,
-        title = "NoteVault",
+        title = "NotaVault",
         state = rememberWindowState()
     ) {
         // Utiliser notre système de navigation pour gérer les écrans

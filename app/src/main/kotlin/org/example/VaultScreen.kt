@@ -1,23 +1,38 @@
 package org.example
 
-import androidx.compose.animation.*
-import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.*
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.Image
 import androidx.compose.material.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -28,14 +43,11 @@ import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.*
 import org.example.entities.Image
 import org.example.entities.User
-import org.jetbrains.skia.Image as SkiaImage
-import java.awt.FileDialog
-import java.awt.Frame
 import java.io.File
-import java.time.format.DateTimeFormatter
 import javax.imageio.ImageIO
 import javax.swing.JFileChooser
 import javax.swing.filechooser.FileNameExtensionFilter
+import java.io.ByteArrayInputStream
 
 /**
  * Écran du coffre-fort d'images
@@ -189,11 +201,11 @@ fun VaultScreen(
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Image,
-                                contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.5f),
-                                modifier = Modifier.size(100.dp)
+                            // Simple texte au lieu d'icône pour éviter les problèmes
+                            Text(
+                                text = "🖼️",
+                                fontSize = 64.sp,
+                                color = Color.White.copy(alpha = 0.5f),
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
@@ -229,7 +241,7 @@ fun VaultScreen(
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         items(vaultImages) { image ->
-                            ImageThumbnail(
+                            ImageCard(
                                 image = image,
                                 imageRepository = imageRepository,
                                 onClick = {
@@ -322,7 +334,7 @@ fun VaultScreen(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.FolderOpen,
+                                    imageVector = Icons.Default.Add,
                                     contentDescription = null,
                                     tint = Color.White
                                 )
@@ -350,139 +362,41 @@ fun VaultScreen(
             }
             
             // Dialogue de détail d'image
-            if (showImageDetail && selectedImage != null && fullImageData != null) {
-                Dialog(onDismissRequest = { 
+            if (showImageDetail && selectedImage != null) {
+    Dialog(
+        onDismissRequest = { 
+            showImageDetail = false
+            fullImageData = null 
+        },
+        properties = DialogProperties(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false // Permet d'avoir un dialogue en plein écran
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .fillMaxHeight(0.9f)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color(0xFF2A2A3A))
+        ) {
+            EnhancedImageViewer(
+                currentImage = selectedImage!!,
+                allImages = vaultImages,
+                imageRepository = imageRepository,
+                onClose = {
                     showImageDetail = false
-                    fullImageData = null 
-                }) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(0.9f)
-                            .fillMaxHeight(0.8f)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xFF2A2A3A))
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(16.dp)
-                        ) {
-                            // En-tête avec le nom et les actions
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 16.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = selectedImage!!.imageName,
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 18.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                
-                                IconButton(
-                                    onClick = { showImageDetail = false },
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .background(Color(0xFF3A3A3A), CircleShape)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Fermer",
-                                        tint = Color.White
-                                    )
-                                }
-                            }
-                            
-                            // Affichage de l'image
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF1A1A2E))
-                            ) {
-                                // Convertir les données binaires en ImageBitmap
-                                val imageBitmap = remember(fullImageData) {
-                                    fullImageData?.let {
-                                        SkiaImage.makeFromEncoded(it).asImageBitmap()
-                                    }
-                                }
-                                
-                                if (imageBitmap != null) {
-                                    Image(
-                                        bitmap = imageBitmap,
-                                        contentDescription = selectedImage!!.imageName,
-                                        contentScale = ContentScale.Fit,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        CircularProgressIndicator(color = MaterialTheme.colors.primary)
-                                    }
-                                }
-                            }
-                            
-                            // Boutons d'action
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Button(
-                                    onClick = {
-                                        newImageName = selectedImage!!.imageName
-                                        showImageDetail = false
-                                        showRenameDialog = true
-                                    },
-                                    colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF3A3A3A)),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Edit,
-                                        contentDescription = "Renommer",
-                                        tint = Color.White
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "Renommer",
-                                        color = Color.White
-                                    )
-                                }
-                                
-                                Button(
-                                    onClick = {
-                                        showImageDetail = false
-                                        showDeleteConfirmDialog = true
-                                    },
-                                    colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFC62828)),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "Supprimer",
-                                        tint = Color.White
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "Supprimer",
-                                        color = Color.White
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    fullImageData = null
+                },
+                onImageChange = { newImage ->
+                    selectedImage = newImage
+                    // La récupération des données se fait dans EnhancedImageViewer
                 }
-            }
+            )
+        }
+    }
+}
             
             // Dialogue de renommage
             if (showRenameDialog && selectedImage != null) {
@@ -581,35 +495,82 @@ fun VaultScreen(
                                 .padding(16.dp)
                                 .fillMaxWidth()
                         ) {
-                            Text(
-                                text = "Supprimer l'image",
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
+                            // Titre et icône d'avertissement
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.padding(bottom = 8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = null,
+                                    tint = Color(0xFFF44336),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Confirmer la suppression",
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                            
+                            Divider(color = Color.Gray.copy(alpha = 0.3f), thickness = 1.dp)
+                            Spacer(modifier = Modifier.height(16.dp))
+                            
+                            // Message plus détaillé
+                            Text(
+                                text = "Vous êtes sur le point de supprimer définitivement l'image :",
+                                color = Color.White.copy(alpha = 0.7f)
                             )
                             
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            // Nom de l'image mis en évidence
                             Text(
-                                text = "Êtes-vous sûr de vouloir supprimer cette image ? Cette action est irréversible.",
-                                color = Color.White.copy(alpha = 0.7f),
+                                text = selectedImage!!.imageName,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0xFF1A1A2E), RoundedCornerShape(4.dp))
+                                    .padding(8.dp)
+                            )
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            // Avertissement en rouge
+                            Text(
+                                text = "Cette action est irréversible et l'image sera perdue définitivement.",
+                                color = Color(0xFFF44336),
+                                // Remplacer FontStyle.Italic par une solution qui ne nécessite pas d'import supplémentaire
+                                fontWeight = FontWeight.Light,
                                 modifier = Modifier.padding(bottom = 16.dp)
                             )
                             
+                            // Boutons d'action avec texte plus explicite
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.End
                             ) {
-                                TextButton(
-                                    onClick = { showDeleteConfirmDialog = false }
+                                // Bouton Annuler plus visible - sans BorderStroke
+                                OutlinedButton(
+                                    onClick = { showDeleteConfirmDialog = false },
+                                    // Suppression de border = BorderStroke()
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        backgroundColor = Color.Transparent,
+                                        contentColor = Color.White
+                                    )
                                 ) {
                                     Text(
                                         text = "Annuler",
-                                        color = Color.White.copy(alpha = 0.7f)
+                                        fontWeight = FontWeight.Medium
                                     )
                                 }
                                 
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
                                 
+                                // Bouton Supprimer avec texte plus explicite
                                 Button(
                                     onClick = {
                                         coroutineScope.launch {
@@ -622,9 +583,16 @@ fun VaultScreen(
                                     },
                                     colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFC62828))
                                 ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = null,
+                                        tint = Color.White
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = "Supprimer",
-                                        color = Color.White
+                                        text = "Supprimer définitivement",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Medium
                                     )
                                 }
                             }
@@ -640,7 +608,7 @@ fun VaultScreen(
  * Composant pour afficher une miniature d'image dans la grille
  */
 @Composable
-fun ImageThumbnail(
+fun ImageCard(
     image: Image,
     imageRepository: ImageRepository,
     onClick: () -> Unit,
@@ -648,18 +616,16 @@ fun ImageThumbnail(
     onDelete: () -> Unit
 ) {
     // État pour la miniature bitmap
-    var thumbnailBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    var thumbnailData by remember { mutableStateOf<ByteArray?>(null) }
+    // État pour contrôler l'affichage du menu
+    var showMenu by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
     
     // Charger la miniature
     LaunchedEffect(image) {
         coroutineScope.launch {
-            val thumbnailData = withContext(Dispatchers.IO) {
+            thumbnailData = withContext(Dispatchers.IO) {
                 imageRepository.getImageThumbnail(image.idImage)
-            }
-            
-            if (thumbnailData != null) {
-                thumbnailBitmap = SkiaImage.makeFromEncoded(thumbnailData).asImageBitmap()
             }
         }
     }
@@ -675,12 +641,13 @@ fun ImageThumbnail(
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             // Afficher la miniature ou un placeholder
-            if (thumbnailBitmap != null) {
-                Image(
-                    bitmap = thumbnailBitmap!!,
+            if (thumbnailData != null) {
+                // Utiliser un composant personnalisé pour éviter les problèmes d'asImageBitmap
+                ByteArrayImage(
+                    imageData = thumbnailData!!,
                     contentDescription = image.imageName,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
                 )
             } else {
                 Box(
@@ -689,16 +656,15 @@ fun ImageThumbnail(
                         .background(Color(0xFF1A1A2E)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Image,
-                        contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.5f),
-                        modifier = Modifier.size(48.dp)
+                    Text(
+                        text = "🖼️",
+                        fontSize = 32.sp,
+                        color = Color.White.copy(alpha = 0.5f)
                     )
                 }
             }
             
-            // Overlay avec le nom de l'image et les actions
+            // Overlay avec le nom de l'image
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -715,40 +681,408 @@ fun ImageThumbnail(
                 )
             }
             
-            // Actions rapides
-            Row(
+            // Bouton avec trois points (menu)
+            Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(4.dp)
             ) {
                 IconButton(
-                    onClick = onRename,
+                    onClick = { showMenu = true },
                     modifier = Modifier
                         .size(28.dp)
                         .background(Color(0xAA000000), CircleShape)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Edit,
-                        contentDescription = "Renommer",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
+                    // Icône de trois points verticaux (menu)
+                    Column(
+                        modifier = Modifier.size(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(3.dp)
+                                .background(Color.White, CircleShape)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(3.dp)
+                                .background(Color.White, CircleShape)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(3.dp)
+                                .background(Color.White, CircleShape)
+                        )
+                    }
                 }
                 
-                Spacer(modifier = Modifier.width(4.dp))
-                
-                IconButton(
-                    onClick = onDelete,
+                // Menu dropdown
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false },
                     modifier = Modifier
-                        .size(28.dp)
-                        .background(Color(0xAAC62828), CircleShape)
+                        .background(Color(0xFF2A2A3A))
+                        .width(180.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Supprimer",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
+                    // Option Renommer
+                    DropdownMenuItem(
+                        onClick = {
+                            onRename()
+                            showMenu = false
+                        }
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = null,
+                                tint = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Renommer",
+                                color = Color.White
+                            )
+                        }
+                    }
+                    
+                    // Option Supprimer
+                    DropdownMenuItem(
+                        onClick = {
+                            onDelete()
+                            showMenu = false
+                        }
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = null,
+                                tint = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Supprimer",
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Composant personnalisé pour afficher une image à partir d'un ByteArray
+ * sans utiliser asImageBitmap qui pose problème
+ */
+@Composable
+fun ByteArrayImage(
+    imageData: ByteArray,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Fit
+) {
+    var bitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    
+    // Charger l'image dans un effet secondaire
+    LaunchedEffect(imageData) {
+        withContext(Dispatchers.IO) {
+            try {
+                // Utiliser la méthode de ImageRepository si vous l'avez déjà
+                // Sinon, convertir directement ici
+                val imageStream = ByteArrayInputStream(imageData)
+                val bufferedImage = ImageIO.read(imageStream)
+                if (bufferedImage != null) {
+                    bitmap = bufferedImage.toComposeImageBitmap()
+                }
+            } catch (e: Exception) {
+                println("Erreur lors de la conversion de l'image: ${e.message}")
+                e.printStackTrace()
+            }
+        }
+    }
+    
+    Box(
+        modifier = modifier.background(Color(0xFF1A1A2E)),
+        contentAlignment = Alignment.Center
+    ) {
+        if (bitmap != null) {
+            // Afficher l'image
+            Image(
+                bitmap = bitmap!!,
+                contentDescription = contentDescription,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = contentScale
+            )
+        } else {
+            // Afficher un indicateur de chargement ou un placeholder
+            CircularProgressIndicator(color = Color.White)
+        }
+    }
+}
+
+@Composable
+fun EnhancedImageViewer(
+    currentImage: Image,
+    allImages: List<Image>,
+    imageRepository: ImageRepository,
+    onClose: () -> Unit,
+    onImageChange: (Image) -> Unit
+) {
+    // État pour les données de l'image
+    var fullImageData by remember { mutableStateOf<ByteArray?>(null) }
+    
+    // État pour le mode plein écran
+    var isFullScreen by remember { mutableStateOf(false) }
+    
+    // Obtenir l'index de l'image actuelle et calculer les indices précédent/suivant
+    val currentIndex = allImages.indexOfFirst { it.idImage == currentImage.idImage }
+    val hasPrevious = currentIndex > 0
+    val hasNext = currentIndex < allImages.size - 1
+    
+    // Charger l'image
+    LaunchedEffect(currentImage) {
+        fullImageData = null // Réinitialiser pendant le chargement
+        fullImageData = withContext(Dispatchers.IO) {
+            imageRepository.getImageData(currentImage.idImage)
+        }
+    }
+    
+    // Fonction pour naviguer vers l'image précédente
+    fun navigateToPrevious() {
+        if (hasPrevious) {
+            onImageChange(allImages[currentIndex - 1])
+        }
+    }
+    
+    // Fonction pour naviguer vers l'image suivante
+    fun navigateToNext() {
+        if (hasNext) {
+            onImageChange(allImages[currentIndex + 1])
+        }
+    }
+    
+    // Intercepter les événements clavier
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onKeyEvent { keyEvent ->
+                when {
+                    keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionLeft -> {
+                        navigateToPrevious()
+                        true
+                    }
+                    keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionRight -> {
+                        navigateToNext()
+                        true
+                    }
+                    keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.Escape -> {
+                        if (isFullScreen) {
+                            isFullScreen = false
+                        } else {
+                            onClose()
+                        }
+                        true
+                    }
+                    keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.F || 
+                    keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.Enter -> {
+                        isFullScreen = !isFullScreen
+                        true
+                    }
+                    else -> false
+                }
+            }
+            .focusRequester(remember { FocusRequester() })
+            .focusable()
+    ) {
+        // Fond
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0F0F1E))
+        ) {
+            // Contenu principal
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(if (isFullScreen) 0.dp else 16.dp)
+            ) {
+                // Barre de titre (visible uniquement si pas en plein écran)
+                if (!isFullScreen) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = currentImage.imageName,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        
+                        // Boutons d'action
+                        Row {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            
+                            // Bouton fermer
+                            IconButton(
+                                onClick = onClose,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(Color(0xFF3A3A3A), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Fermer",
+                                    tint = Color.White
+                                )
+                            }
+                        }
+                    }
+                }
+                
+                // Conteneur de l'image avec flèches de navigation
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    // Image
+                    if (fullImageData != null) {
+                        ByteArrayImage(
+                            imageData = fullImageData!!,
+                            contentDescription = currentImage.imageName,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = MaterialTheme.colors.primary)
+                        }
+                    }
+                    
+                    // Superposition semi-transparente pour contrôles en mode plein écran
+                    if (isFullScreen) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .pointerInput(Unit) {
+                                    detectTapGestures {
+                                        isFullScreen = false
+                                    }
+                                }
+                        ) {
+                            // Bouton quitter plein écran (en haut à droite)
+                            IconButton(
+                                onClick = { isFullScreen = false },
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(16.dp)
+                                    .size(44.dp)
+                                    .background(Color(0x99000000), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Quitter le mode plein écran",
+                                    tint = Color.White
+                                )
+                            }
+                        }
+                    }
+                    
+                    // Flèches de navigation (toujours visibles)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Flèche précédente
+                        if (hasPrevious) {
+                            IconButton(
+                                onClick = { navigateToPrevious() },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(Color(0x99000000), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowBack,
+                                    contentDescription = "Image précédente",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                            }
+                        } else {
+                            Spacer(modifier = Modifier.size(48.dp))
+                        }
+                        
+                        // Espace central
+                        Spacer(modifier = Modifier.weight(1f))
+                        
+                        // Flèche suivante
+                        if (hasNext) {
+                            IconButton(
+                                onClick = { navigateToNext() },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(Color(0x99000000), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowForward,
+                                    contentDescription = "Image suivante",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                            }
+                        } else {
+                            Spacer(modifier = Modifier.size(48.dp))
+                        }
+                    }
+                }
+                
+                // Barre inférieure (visible uniquement si pas en plein écran)
+                if (!isFullScreen) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Indicateur de position
+                        Text(
+                            text = "Image ${currentIndex + 1} sur ${allImages.size}",
+                            color = Color.White.copy(alpha = 0.7f)
+                        )
+                        
+                        // Bouton plein écran supplémentaire
+                        Button(
+                            onClick = { isFullScreen = true },
+                            colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF3A3A3A))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = null,
+                                tint = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Plein écran",
+                                color = Color.White
+                            )
+                        }
+                    }
                 }
             }
         }

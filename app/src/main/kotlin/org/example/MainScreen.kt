@@ -7,7 +7,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,8 +60,12 @@ fun MainScreen(
     // Obtenir toutes les couleurs disponibles
     var availableColors by remember { mutableStateOf(emptyList<org.example.entities.Color>()) }
     
-    // Couleur actuellement sélectionnée pour la note
-    var selectedColor by remember { mutableStateOf<org.example.entities.Color?>(null) }
+    // *** IMPORTANT: Séparer clairement la couleur de la note et le filtre de couleur ***
+    // Filtre de couleur pour la sidebar - UNIQUEMENT modifié par la sidebar
+    var colorFilter by remember { mutableStateOf<org.example.entities.Color?>(null) }
+    
+    // État local pour la couleur active de la note (pour mise à jour immédiate de l'UI)
+    var activeNoteColor by remember { mutableStateOf<org.example.entities.Color?>(null) }
     
     // État pour indiquer si une sauvegarde est en cours
     var isSaving by remember { mutableStateOf(false) }
@@ -71,6 +76,9 @@ fun MainScreen(
     // État pour montrer ou masquer le panneau latéral sur mobile
     var showSidebar by remember { mutableStateOf(true) }
     
+    // État pour savoir si on affiche le coffre d'images
+    var showVault by remember { mutableStateOf(false) }
+    
     // Fonction pour rafraîchir les notes
     fun refreshNotes() {
         println("DEBUG: Début de refreshNotes()")
@@ -78,7 +86,14 @@ fun MainScreen(
             try {
                 withContext(Dispatchers.IO) {
                     println("DEBUG: Récupération des notes de l'utilisateur ${currentUser.idUser}")
-                    val userNotes = noteRepository.getUserNotes(currentUser.idUser)
+                    
+                    // Si un filtre de couleur est actif, récupérer uniquement les notes de cette couleur
+                    val userNotes = if (colorFilter != null) {
+                        noteRepository.getNotesByColor(currentUser.idUser, colorFilter!!.idColor)
+                    } else {
+                        noteRepository.getUserNotes(currentUser.idUser)
+                    }
+                    
                     println("DEBUG: ${userNotes.size} notes récupérées")
                     
                     // Déchiffrer chaque note, avec gestion des erreurs
@@ -97,8 +112,20 @@ fun MainScreen(
                     }
                     
                     println("DEBUG: ${decrypted.size} notes déchiffrées")
-                    notes = userNotes
-                    decryptedNotes = decrypted
+                    
+                    // Utiliser l'UI dispatcher pour mettre à jour l'état de manière sûre
+                    withContext(Dispatchers.Default) {
+                        notes = userNotes
+                        decryptedNotes = decrypted
+                        
+                        // Mettre à jour activeNoteColor si la note sélectionnée a changé
+                        if (selectedNote != null) {
+                            val updatedNote = userNotes.find { it.idNote == selectedNote!!.idNote }
+                            if (updatedNote != null) {
+                                activeNoteColor = updatedNote.color
+                            }
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 println("DEBUG: EXCEPTION dans refreshNotes: ${e.message}")
@@ -194,44 +221,213 @@ fun MainScreen(
                 val width = maxWidth
                 val isTabletOrDesktop = width > 700.dp
                 
-                Row(modifier = Modifier.fillMaxSize()) {
-                    // Barre latérale (menu)
-                    AnimatedVisibility(
-                        visible = showSidebar || isTabletOrDesktop,
-                        enter = slideInHorizontally() + fadeIn(),
-                        exit = slideOutHorizontally() + fadeOut()
-                    ) {
-                        SidebarPanel(
-                            width = if (isTabletOrDesktop) 300.dp else width * 0.8f,
-                            notes = notes,
-                            decryptedNotes = decryptedNotes,
-                            searchQuery = searchQuery,
-                            onSearchQueryChange = { newQuery ->
-                                searchQuery = newQuery
-                                coroutineScope.launch {
-                                    if (newQuery.isBlank()) {
-                                        refreshNotes()
-                                    } else {
-                                        withContext(Dispatchers.IO) {
-                                            val searchResults = noteRepository.searchNotes(currentUser.idUser, newQuery)
-                                            val decryptedResults = searchResults.associateBy(
-                                                { it.idNote },
-                                                { noteRepository.decryptNote(it) ?: Pair("", "") }
-                                            )
-                                            
-                                            notes = searchResults
-                                            decryptedNotes = decryptedResults
+                if (showVault) {
+                    // Afficher le VaultScreen si activé
+                    VaultScreen(
+                        currentUser = currentUser,
+                        onBackToNotes = { showVault = false }
+                    )
+                } else {
+                    // Afficher l'écran principal des notes
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        // Barre latérale (menu)
+                        AnimatedVisibility(
+                            visible = showSidebar || isTabletOrDesktop,
+                            enter = slideInHorizontally() + fadeIn(),
+                            exit = slideOutHorizontally() + fadeOut()
+                        ) {
+                            SidebarComponent(
+                                currentUser = currentUser,
+                                notes = notes,
+                                selectedNoteId = selectedNote?.idNote,
+                                onNoteSelected = { noteId ->
+                                    val note = notes.find { it.idNote == noteId }
+                                    if (note != null) {
+                                        // Sauvegarder les modifications de la note actuellement ouverte
+                                        if (selectedNote != null && (selectedNote!!.idNote != note.idNote)) {
+                                            debounceJob?.cancel()
+                                            if (noteModified) {
+                                                saveCurrentNote(selectedNote!!, editorTitle.text, editorContent.text) {
+                                                    statusMessage = "Note sauvegardée"
+                                                    coroutineScope.launch {
+                                                        delay(2000)
+                                                        statusMessage = null
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        
+                                        selectedNote = note
+                                        // Mettre à jour la couleur active immédiatement
+                                        activeNoteColor = note.color
+                                        
+                                        val decrypted = decryptedNotes[note.idNote]
+                                        if (decrypted != null) {
+                                            editorTitle = TextFieldValue(decrypted.first)
+                                            editorContent = TextFieldValue(decrypted.second)
+                                            lastSavedTitle = decrypted.first
+                                            lastSavedContent = decrypted.second
+                                            noteModified = false
+                                        }
+                                        
+                                        if (!isTabletOrDesktop) {
+                                            showSidebar = false
                                         }
                                     }
+                                },
+                                onAddNote = {
+                                    println("DEBUG: Bouton + cliqué, création d'une nouvelle note")
+                                    coroutineScope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            try {
+                                                val newNote = noteRepository.createNote(
+                                                    userId = currentUser.idUser,
+                                                    title = "Nouvelle note",
+                                                    content = "",
+                                                    colorId = 6
+                                                )
+                                                if (newNote != null) {
+                                                    // Mettre à jour les états sur le thread principal
+                                                    withContext(Dispatchers.Default) {
+                                                        refreshNotes()
+                                                        debounceJob?.cancel()
+                                                        selectedNote = newNote
+                                                        // Mettre à jour la couleur active immédiatement
+                                                        activeNoteColor = newNote.color
+                                                        
+                                                        editorTitle = TextFieldValue("Nouvelle note")
+                                                        editorContent = TextFieldValue("")
+                                                        lastSavedTitle = "Nouvelle note"
+                                                        lastSavedContent = ""
+                                                        noteModified = false
+                                                    }
+                                                    
+                                                    if (!isTabletOrDesktop) {
+                                                        showSidebar = false
+                                                    }
+                                                }
+                                            } catch (e: Exception) {
+                                                e.printStackTrace()
+                                            }
+                                        }
+                                    }
+                                },
+                                onGoToVault = {
+                                    // Passer à l'écran du coffre d'images
+                                    showVault = true
+                                },
+                                onLogout = onLogout,
+                                onColorFilterChange = { color ->
+                                    // IMPORTANT: C'est ici que le filtre de couleur est modifié
+                                    // Cette fonction est uniquement appelée depuis la sidebar
+                                    colorFilter = color
+                                    refreshNotes()
+                                },
+                                selectedColorFilter = colorFilter, // Passer le filtre de couleur à la sidebar
+                                colors = availableColors,
+                                noteRepository = noteRepository
+                            )
+                        }
+                        
+                        // Contenu principal (éditeur de notes)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                        ) {
+                            if (!isTabletOrDesktop && !showSidebar) {
+                                // Bouton pour afficher le menu latéral sur mobile
+                                IconButton(
+                                    onClick = { showSidebar = true },
+                                    modifier = Modifier
+                                        .padding(16.dp)
+                                        .size(48.dp)
+                                        .background(MaterialTheme.colors.primary, CircleShape)
+                                        .align(Alignment.TopStart)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Menu,
+                                        contentDescription = "Menu",
+                                        tint = Color.White
+                                    )
                                 }
-                            },
-                            onNoteSelected = { note ->
-                                // Sauvegarder les modifications de la note actuellement ouverte
-                                if (selectedNote != null && (selectedNote!!.idNote != note.idNote)) {
-                                    // Annuler le job de debounce en cours
-                                    debounceJob?.cancel()
-                                    
-                                    if (noteModified) {
+                            }
+                            
+                            if (selectedNote != null) {
+                                NoteEditor(
+                                    title = editorTitle,
+                                    onTitleChange = { 
+                                        editorTitle = it 
+                                        // Vérifier s'il y a eu une modification
+                                        val wasModified = noteModified
+                                        noteModified = editorTitle.text != lastSavedTitle || editorContent.text != lastSavedContent
+                                        
+                                        // Si l'état est passé de non-modifié à modifié, déclencher un debounce
+                                        if (noteModified && !wasModified) {
+                                            println("DEBUG: Contenu modifié, préparation de l'auto-sauvegarde")
+                                        }
+                                        
+                                        // Déclencher le debounce à chaque modification
+                                        if (noteModified) {
+                                            triggerDebounceAutosave()
+                                        }
+                                    },
+                                    content = editorContent,
+                                    onContentChange = { 
+                                        editorContent = it 
+                                        // Vérifier s'il y a eu une modification
+                                        val wasModified = noteModified
+                                        noteModified = editorTitle.text != lastSavedTitle || editorContent.text != lastSavedContent
+                                        
+                                        // Si l'état est passé de non-modifié à modifié, déclencher un debounce
+                                        if (noteModified && !wasModified) {
+                                            println("DEBUG: Contenu modifié, préparation de l'auto-sauvegarde")
+                                        }
+                                        
+                                        // Déclencher le debounce à chaque modification
+                                        if (noteModified) {
+                                            triggerDebounceAutosave()
+                                        }
+                                    },
+                                    noteColor = activeNoteColor, // Utiliser activeNoteColor au lieu de selectedNote?.color
+                                    availableColors = availableColors,
+                                    onColorChange = { newColor ->
+                                        // Mettre à jour immédiatement l'état local pour une UI réactive
+                                        activeNoteColor = newColor
+                                        
+                                        // Sauvegarder le changement de couleur en arrière-plan
+                                        coroutineScope.launch {
+                                            withContext(Dispatchers.IO) {
+                                                noteRepository.updateNote(
+                                                    noteId = selectedNote!!.idNote,
+                                                    colorId = newColor.idColor
+                                                )
+                                                
+                                                // Si la note est actuellement filtrée par couleur
+                                                // et que la nouvelle couleur ne correspond pas au filtre,
+                                                // désactiver le filtre pour que la note reste visible
+                                                if (colorFilter != null && colorFilter!!.idColor != newColor.idColor) {
+                                                    colorFilter = null
+                                                }
+                                                
+                                                // Récupérer la note mise à jour
+                                                val updatedNote = noteRepository.getNoteById(selectedNote!!.idNote)
+                                                if (updatedNote != null) {
+                                                    // Mettre à jour l'état en toute sécurité
+                                                    withContext(Dispatchers.Default) {
+                                                        selectedNote = updatedNote
+                                                    }
+                                                }
+                                                
+                                                // Rafraîchir les notes pour mettre à jour l'affichage
+                                                refreshNotes()
+                                            }
+                                        }
+                                    },
+                                    onSave = {
+                                        // Annuler tout debounce en cours
+                                        debounceJob?.cancel()
+                                        
                                         saveCurrentNote(selectedNote!!, editorTitle.text, editorContent.text) {
                                             statusMessage = "Note sauvegardée"
                                             coroutineScope.launch {
@@ -239,267 +435,58 @@ fun MainScreen(
                                                 statusMessage = null
                                             }
                                         }
-                                    }
-                                }
-                                
-                                // Sélectionner la nouvelle note
-                                selectedNote = note
-                                val decrypted = decryptedNotes[note.idNote]
-                                if (decrypted != null) {
-                                    editorTitle = TextFieldValue(decrypted.first)
-                                    editorContent = TextFieldValue(decrypted.second)
-                                    selectedColor = note.color
-                                    
-                                    // Initialiser les variables de suivi des modifications
-                                    lastSavedTitle = decrypted.first
-                                    lastSavedContent = decrypted.second
-                                    noteModified = false
-                                }
-                                
-                                if (!isTabletOrDesktop) {
-                                    showSidebar = false
-                                }
-                            },
-                            onNewNote = {
-                                println("DEBUG: Bouton + cliqué, création d'une nouvelle note")
-                                coroutineScope.launch {
-                                    withContext(Dispatchers.IO) {
-                                        try {
-                                            // Simplifier la gestion des couleurs en utilisant directement l'ID 6 sans vérification
-                                            println("DEBUG: Création d'une note avec couleur ID=6 (violet)")
-                                            val newNote = noteRepository.createNote(
-                                                userId = currentUser.idUser,
-                                                title = "Nouvelle note",
-                                                content = "",
-                                                colorId = 6  // Toujours utiliser l'ID 6 (violet) pour les nouvelles notes
-                                            )
-
-                                            println("DEBUG: Résultat création note: $newNote")
-
-                                            if (newNote != null) {
-                                                println("DEBUG: Note créée avec succès, refreshNotes()")
-                                                refreshNotes()
-
-                                                // Annuler le job de debounce en cours si présent
-                                                debounceJob?.cancel()
-
-                                                // Sélectionner automatiquement la nouvelle note
-                                                println("DEBUG: Sélection de la nouvelle note")
-                                                selectedNote = newNote
-                                                editorTitle = TextFieldValue("Nouvelle note")
-                                                editorContent = TextFieldValue("")
-                                                selectedColor = availableColors.find { it.idColor == 6 }  // Facultatif : pour afficher la bonne couleur dans l'UI
-                                                
-                                                // Initialiser les variables de suivi des modifications pour la nouvelle note
-                                                lastSavedTitle = "Nouvelle note"
-                                                lastSavedContent = ""
-                                                noteModified = false
-
-                                                // Fermer le panneau latéral sur mobile
-                                                if (!isTabletOrDesktop) {
-                                                    showSidebar = false
-                                                }
-
-                                                // Afficher un message de confirmation
-                                                statusMessage = "Note créée avec succès"
-                                                coroutineScope.launch {
-                                                    delay(2000)
-                                                    statusMessage = null
-                                                }
-                                            } else {
-                                                println("DEBUG: ERREUR - La note créée est null")
-                                                statusMessage = "Erreur lors de la création de la note"
-                                                coroutineScope.launch {
-                                                    delay(2000)
-                                                    statusMessage = null
-                                                }
-                                            }
-                                        } catch (e: Exception) {
-                                            println("DEBUG: EXCEPTION lors de la création de la note: ${e.message}")
-                                            e.printStackTrace()
-                                            statusMessage = "Erreur: ${e.message}"
-                                            coroutineScope.launch {
-                                                delay(3000)
-                                                statusMessage = null
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            onDeleteNote = { note ->
-                                coroutineScope.launch {
-                                    withContext(Dispatchers.IO) {
-                                        if (noteRepository.deleteNote(note.idNote)) {
-                                            refreshNotes()
-                                            
-                                            // Si la note supprimée était sélectionnée, désélectionner
-                                            if (selectedNote?.idNote == note.idNote) {
-                                                selectedNote = null
-                                                editorTitle = TextFieldValue("")
-                                                editorContent = TextFieldValue("")
-                                                debounceJob?.cancel()
-                                                noteModified = false
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            onLogout = {
-                                // Annuler le job de debounce en cours
-                                debounceJob?.cancel()
-                                
-                                if (selectedNote != null && noteModified) {
-                                    saveCurrentNote(selectedNote!!, editorTitle.text, editorContent.text) {
-                                        onLogout()
-                                    }
-                                } else {
-                                    onLogout()
-                                }
-                            },
-                            currentUser = currentUser
-                        )
-                    }
-                    
-                    // Contenu principal (éditeur de notes)
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                    ) {
-                        if (!isTabletOrDesktop && !showSidebar) {
-                            // Bouton pour afficher le menu latéral sur mobile
-                            IconButton(
-                                onClick = { showSidebar = true },
-                                modifier = Modifier
-                                    .padding(16.dp)
-                                    .size(48.dp)
-                                    .background(MaterialTheme.colors.primary, CircleShape)
-                                    .align(Alignment.TopStart)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Menu,
-                                    contentDescription = "Menu",
-                                    tint = Color.White
+                                    },
+                                    isSaving = isSaving
                                 )
-                            }
-                        }
-                        
-                        if (selectedNote != null) {
-                            NoteEditor(
-                                title = editorTitle,
-                                onTitleChange = { 
-                                    editorTitle = it 
-                                    // Vérifier s'il y a eu une modification
-                                    val wasModified = noteModified
-                                    noteModified = editorTitle.text != lastSavedTitle || editorContent.text != lastSavedContent
-                                    
-                                    // Si l'état est passé de non-modifié à modifié, déclencher un debounce
-                                    if (noteModified && !wasModified) {
-                                        println("DEBUG: Contenu modifié, préparation de l'auto-sauvegarde")
-                                    }
-                                    
-                                    // Déclencher le debounce à chaque modification
-                                    if (noteModified) {
-                                        triggerDebounceAutosave()
-                                    }
-                                },
-                                content = editorContent,
-                                onContentChange = { 
-                                    editorContent = it 
-                                    // Vérifier s'il y a eu une modification
-                                    val wasModified = noteModified
-                                    noteModified = editorTitle.text != lastSavedTitle || editorContent.text != lastSavedContent
-                                    
-                                    // Si l'état est passé de non-modifié à modifié, déclencher un debounce
-                                    if (noteModified && !wasModified) {
-                                        println("DEBUG: Contenu modifié, préparation de l'auto-sauvegarde")
-                                    }
-                                    
-                                    // Déclencher le debounce à chaque modification
-                                    if (noteModified) {
-                                        triggerDebounceAutosave()
-                                    }
-                                },
-                                noteColor = selectedColor,
-                                availableColors = availableColors,
-                                onColorChange = { newColor ->
-                                    selectedColor = newColor
-                                    
-                                    // Sauvegarder le changement de couleur en arrière-plan
-                                    coroutineScope.launch {
-                                        withContext(Dispatchers.IO) {
-                                            noteRepository.updateNote(
-                                                noteId = selectedNote!!.idNote,
-                                                colorId = newColor.idColor
-                                            )
-                                            
-                                            // Rafraîchir les notes pour mettre à jour l'affichage dans la barre latérale
-                                            refreshNotes()
-                                        }
-                                    }
-                                },
-                                onSave = {
-                                    // Annuler tout debounce en cours
-                                    debounceJob?.cancel()
-                                    
-                                    saveCurrentNote(selectedNote!!, editorTitle.text, editorContent.text) {
-                                        statusMessage = "Note sauvegardée"
-                                        coroutineScope.launch {
-                                            delay(2000)
-                                            statusMessage = null
-                                        }
-                                    }
-                                },
-                                isSaving = isSaving
-                            )
-                        } else {
-                            // Affichage d'un message si aucune note n'est sélectionnée
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    modifier = Modifier.padding(16.dp)
+                            } else {
+                                // Affichage d'un message si aucune note n'est sélectionnée
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Add,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(100.dp),
-                                        tint = Color.White.copy(alpha = 0.5f)
-                                    )
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Text(
-                                        text = "Sélectionnez une note ou créez-en une nouvelle",
-                                        color = Color.White.copy(alpha = 0.7f),
-                                        fontSize = 18.sp,
-                                        textAlign = TextAlign.Center
-                                    )
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier.padding(16.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(100.dp),
+                                            tint = Color.White.copy(alpha = 0.5f)
+                                        )
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                        Text(
+                                            text = "Sélectionnez une note ou créez-en une nouvelle",
+                                            color = Color.White.copy(alpha = 0.7f),
+                                            fontSize = 18.sp,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
                                 }
                             }
-                        }
-                        
-                        // Affichage du message de statut
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .align(Alignment.BottomCenter)
-                                .padding(bottom = 16.dp)
-                        ) {
-                            if (statusMessage != null) {
-                                Card(
-                                    backgroundColor = MaterialTheme.colors.primary,
-                                    shape = RoundedCornerShape(8.dp),
-                                    elevation = 4.dp,
-                                    modifier = Modifier
-                                        .padding(16.dp)
-                                        .align(Alignment.Center)
-                                ) {
-                                    Text(
-                                        text = statusMessage ?: "",
-                                        color = Color.White,
-                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                                    )
+                            
+                            // Affichage du message de statut
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = 16.dp)
+                            ) {
+                                if (statusMessage != null) {
+                                    Card(
+                                        backgroundColor = MaterialTheme.colors.primary,
+                                        shape = RoundedCornerShape(8.dp),
+                                        elevation = 4.dp,
+                                        modifier = Modifier
+                                            .padding(16.dp)
+                                            .align(Alignment.Center)
+                                    ) {
+                                        Text(
+                                            text = statusMessage ?: "",
+                                            color = Color.White,
+                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
