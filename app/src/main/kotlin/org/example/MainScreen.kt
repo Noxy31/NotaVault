@@ -81,56 +81,36 @@ fun MainScreen(
     
     // Fonction pour rafraîchir les notes
     fun refreshNotes() {
-        println("DEBUG: Début de refreshNotes()")
         coroutineScope.launch {
             try {
-                withContext(Dispatchers.IO) {
-                    println("DEBUG: Récupération des notes de l'utilisateur ${currentUser.idUser}")
-                    
-                    // Si un filtre de couleur est actif, récupérer uniquement les notes de cette couleur
-                    val userNotes = if (colorFilter != null) {
+                val userNotes = withContext(Dispatchers.IO) {
+                    if (colorFilter != null) {
                         noteRepository.getNotesByColor(currentUser.idUser, colorFilter!!.idColor)
                     } else {
                         noteRepository.getUserNotes(currentUser.idUser)
                     }
-                    
-                    println("DEBUG: ${userNotes.size} notes récupérées")
-                    
-                    // Déchiffrer chaque note, avec gestion des erreurs
-                    val decrypted = mutableMapOf<Int, Pair<String, String>>()
-                    
-                    userNotes.forEach { note ->
-                        try {
-                            println("DEBUG: Déchiffrement de la note ${note.idNote}")
-                            val decryptedPair = noteRepository.decryptNote(note) ?: Pair("", "")
-                            decrypted[note.idNote] = decryptedPair
-                        } catch (e: Exception) {
-                            println("DEBUG: Erreur lors du déchiffrement de la note ${note.idNote}: ${e.message}")
-                            // En cas d'erreur, mettre des valeurs vides
-                            decrypted[note.idNote] = Pair("Erreur de déchiffrement", "")
-                        }
-                    }
-                    
-                    println("DEBUG: ${decrypted.size} notes déchiffrées")
-                    
-                    // Utiliser l'UI dispatcher pour mettre à jour l'état de manière sûre
-                    withContext(Dispatchers.Default) {
-                        notes = userNotes
-                        decryptedNotes = decrypted
-                        
-                        // Mettre à jour activeNoteColor si la note sélectionnée a changé
-                        if (selectedNote != null) {
-                            val updatedNote = userNotes.find { it.idNote == selectedNote!!.idNote }
-                            if (updatedNote != null) {
-                                activeNoteColor = updatedNote.color
-                            }
-                        }
+                }
+                
+                // Déchiffrer en batch dans un thread d'arrière-plan
+                val decrypted = withContext(Dispatchers.IO) {
+                    noteRepository.decryptNotesInBatch(userNotes)
+                }
+                
+                // Mettre à jour les états en une seule fois
+                notes = userNotes
+                decryptedNotes = decrypted
+                
+                // Mise à jour de la note sélectionnée si nécessaire
+                if (selectedNote != null) {
+                    val updatedNote = userNotes.find { it.idNote == selectedNote!!.idNote }
+                    if (updatedNote != null) {
+                        selectedNote = updatedNote
+                        activeNoteColor = updatedNote.color
                     }
                 }
             } catch (e: Exception) {
-                println("DEBUG: EXCEPTION dans refreshNotes: ${e.message}")
+                println("EXCEPTION dans refreshNotes: ${e.message}")
                 e.printStackTrace()
-                // Afficher un message d'erreur
                 statusMessage = "Erreur lors du chargement des notes: ${e.message}"
                 coroutineScope.launch {
                     delay(3000)
@@ -275,43 +255,45 @@ fun MainScreen(
                                         }
                                     }
                                 },
-                                onAddNote = {
-                                    println("DEBUG: Bouton + cliqué, création d'une nouvelle note")
-                                    coroutineScope.launch {
-                                        withContext(Dispatchers.IO) {
-                                            try {
-                                                val newNote = noteRepository.createNote(
-                                                    userId = currentUser.idUser,
-                                                    title = "Nouvelle note",
-                                                    content = "",
-                                                    colorId = 6
-                                                )
-                                                if (newNote != null) {
-                                                    // Mettre à jour les états sur le thread principal
-                                                    withContext(Dispatchers.Default) {
-                                                        refreshNotes()
-                                                        debounceJob?.cancel()
-                                                        selectedNote = newNote
-                                                        // Mettre à jour la couleur active immédiatement
-                                                        activeNoteColor = newNote.color
-                                                        
-                                                        editorTitle = TextFieldValue("Nouvelle note")
-                                                        editorContent = TextFieldValue("")
-                                                        lastSavedTitle = "Nouvelle note"
-                                                        lastSavedContent = ""
-                                                        noteModified = false
-                                                    }
-                                                    
-                                                    if (!isTabletOrDesktop) {
-                                                        showSidebar = false
-                                                    }
-                                                }
-                                            } catch (e: Exception) {
-                                                e.printStackTrace()
+                               onAddNote = {
+                                coroutineScope.launch {
+                                    // Créer la note avec des valeurs initiales
+                                    val newNote = withContext(Dispatchers.IO) {
+                                        noteRepository.createNote(
+                                            userId = currentUser.idUser,
+                                            title = "Nouvelle note",
+                                            content = "",
+                                            colorId = 6
+                                        )
+                                    }
+                                    
+                                    if (newNote != null) {
+                                        // Rafraîchir complètement la liste des notes
+                                        refreshNotes()
+                                        
+                                        // Effectuer la même séquence d'actions que lorsqu'on clique sur une note
+                                        // C'est la clé: simuler exactement ce qui se passe quand on clique sur une note
+                                        val note = notes.find { it.idNote == newNote.idNote }
+                                        if (note != null) {
+                                            selectedNote = note
+                                            activeNoteColor = note.color
+                                            
+                                            val decrypted = decryptedNotes[note.idNote]
+                                            if (decrypted != null) {
+                                                editorTitle = TextFieldValue(decrypted.first)
+                                                editorContent = TextFieldValue(decrypted.second)
+                                                lastSavedTitle = decrypted.first
+                                                lastSavedContent = decrypted.second
+                                                noteModified = false
+                                            }
+                                            
+                                            if (!isTabletOrDesktop) {
+                                                showSidebar = false
                                             }
                                         }
                                     }
-                                },
+                                }
+                            },
                                 onGoToVault = {
                                     // Passer à l'écran du coffre d'images
                                     showVault = true

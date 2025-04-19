@@ -9,7 +9,6 @@ import org.example.entities.Colors
 import org.ktorm.dsl.*
 import org.ktorm.entity.*
 import java.time.LocalDateTime
-import java.time.ZonedDateTime
 import java.time.ZoneId
 
 /**
@@ -25,12 +24,24 @@ class NoteRepository {
     // Clé utilisée pour le chiffrement (idéalement, cette clé devrait être unique par utilisateur)
     private var encryptionKey: String? = null
     
+    // Cache pour les notes déchiffrées afin d'éviter des déchiffrements répétitifs
+    private val decryptionCache = mutableMapOf<Int, Pair<String, String>>()
+    
     /**
      * Définit la clé de chiffrement basée sur l'utilisateur connecté
      * @param user L'utilisateur connecté
      */
     fun setEncryptionKey(user: User) {
         encryptionKey = user.userLogin + "_" + user.idUser + "_secureKey"
+        // Vider le cache quand on change d'utilisateur
+        clearDecryptionCache()
+    }
+    
+    /**
+     * Vide le cache de déchiffrement
+     */
+    fun clearDecryptionCache() {
+        decryptionCache.clear()
     }
     
     /**
@@ -107,6 +118,12 @@ class NoteRepository {
                 val newNote = db.sequenceOf(Notes)
                     .firstOrNull { it.idNote eq insertedId.toInt() }
                 println("Note récupérée: $newNote")
+                
+                // Ajouter au cache de déchiffrement pour éviter un déchiffrement ultérieur
+                if (newNote != null) {
+                    decryptionCache[newNote.idNote] = Pair(title, content)
+                }
+                
                 return newNote
             }
             
@@ -153,6 +170,16 @@ class NoteRepository {
                 set(Notes.noteUpdateDate, LocalDateTime.now())
             }
             
+            // Mettre à jour le cache si title ou content a été modifié
+            if (title != null || content != null) {
+                val currentCache = decryptionCache[noteId]
+                if (currentCache != null) {
+                    val newTitle = title ?: currentCache.first
+                    val newContent = content ?: currentCache.second
+                    decryptionCache[noteId] = Pair(newTitle, newContent)
+                }
+            }
+            
             return true
         } catch (e: Exception) {
             println("Erreur lors de la mise à jour de la note: ${e.message}")
@@ -175,6 +202,9 @@ class NoteRepository {
                 set(Notes.noteDeleteDate, LocalDateTime.now())
             }
             
+            // Retirer du cache
+            decryptionCache.remove(noteId)
+            
             return true
         } catch (e: Exception) {
             println("Erreur lors de la suppression de la note: ${e.message}")
@@ -183,19 +213,19 @@ class NoteRepository {
     }
 
     fun getNotesByColor(userId: Int, colorId: Int): List<Note> {
-    val db = Database.connect()
-    
-    try {
-        return db.sequenceOf(Notes)
-            .filter { (it.idUser eq userId) and (it.idColor eq colorId) and it.noteDeleteDate.isNull() }
-            .sortedByDescending { it.noteCreationDate }
-            .toList()
-    } catch (e: Exception) {
-        println("Erreur lors de la récupération des notes par couleur: ${e.message}")
-        e.printStackTrace()
-        return emptyList()
+        val db = Database.connect()
+        
+        try {
+            return db.sequenceOf(Notes)
+                .filter { (it.idUser eq userId) and (it.idColor eq colorId) and it.noteDeleteDate.isNull() }
+                .sortedByDescending { it.noteCreationDate }
+                .toList()
+        } catch (e: Exception) {
+            println("Erreur lors de la récupération des notes par couleur: ${e.message}")
+            e.printStackTrace()
+            return emptyList()
+        }
     }
-}
     
     /**
      * Récupère une note par son ID
@@ -209,37 +239,32 @@ class NoteRepository {
             .firstOrNull { it.idNote eq noteId }
     }
     
-   /**
- * Récupère toutes les couleurs disponibles
- * @return Liste des couleurs
- */
-/**
- * Récupère toutes les couleurs disponibles
- * @return Liste des couleurs
- */
-fun getAvailableColors(): List<org.example.entities.Color> {
-    val db = Database.connect()
-    
-    try {
-        println("DEBUG: Tentative de récupération des couleurs")
-        val colors = db.sequenceOf(Colors).toList()
-        println("DEBUG: ${colors.size} couleurs récupérées")
+    /**
+     * Récupère toutes les couleurs disponibles
+     * @return Liste des couleurs
+     */
+    fun getAvailableColors(): List<org.example.entities.Color> {
+        val db = Database.connect()
         
-        colors.forEach { color ->
-            println("DEBUG: Couleur récupérée: ID=${color.idColor}, Nom=${color.colorName}, Hexa=${color.colorHexa}")
+        try {
+            println("DEBUG: Tentative de récupération des couleurs")
+            val colors = db.sequenceOf(Colors).toList()
+            println("DEBUG: ${colors.size} couleurs récupérées")
+            
+            colors.forEach { color ->
+                println("DEBUG: Couleur récupérée: ID=${color.idColor}, Nom=${color.colorName}, Hexa=${color.colorHexa}")
+            }
+            
+            return colors
+        } catch (e: Exception) {
+            println("DEBUG: Erreur lors de la récupération des couleurs: ${e.message}")
+            e.printStackTrace()
+            return emptyList()
         }
-        
-        return colors
-    } catch (e: Exception) {
-        println("DEBUG: Erreur lors de la récupération des couleurs: ${e.message}")
-        e.printStackTrace()
-        return emptyList()
     }
-}
-
     
     /**
-     * Déchiffre le titre et le contenu d'une note
+     * Déchiffre le titre et le contenu d'une note avec mise en cache
      * @param note Note à déchiffrer
      * @return Pair (titre déchiffré, contenu déchiffré) ou null en cas d'erreur
      */
@@ -248,16 +273,62 @@ fun getAvailableColors(): List<org.example.entities.Color> {
             throw IllegalStateException("La clé de chiffrement n'est pas définie")
         }
         
+        // Vérifier si la note est déjà dans le cache
+        val cached = decryptionCache[note.idNote]
+        if (cached != null) {
+            return cached
+        }
+        
         try {
             val decryptedTitle = decryptWithAES(note.noteTitle)
             val decryptedContent = decryptWithAES(note.noteContent)
             
-            return Pair(decryptedTitle, decryptedContent)
+            val result = Pair(decryptedTitle, decryptedContent)
+            // Stocker le résultat dans le cache
+            decryptionCache[note.idNote] = result
+            
+            return result
         } catch (e: Exception) {
             println("Erreur lors du déchiffrement de la note: ${e.message}")
             e.printStackTrace()
             return Pair("", "")
         }
+    }
+    
+    /**
+     * Déchiffre un lot de notes en une seule opération
+     * @param notes Liste des notes à déchiffrer
+     * @return Map associant l'ID de la note à son contenu déchiffré
+     */
+    fun decryptNotesInBatch(notes: List<Note>): Map<Int, Pair<String, String>> {
+        if (encryptionKey == null) {
+            throw IllegalStateException("La clé de chiffrement n'est pas définie")
+        }
+        
+        val results = mutableMapOf<Int, Pair<String, String>>()
+        
+        notes.forEach { note ->
+            // Vérifier d'abord si la note est dans le cache
+            val cached = decryptionCache[note.idNote]
+            if (cached != null) {
+                results[note.idNote] = cached
+            } else {
+                try {
+                    val decryptedTitle = decryptWithAES(note.noteTitle)
+                    val decryptedContent = decryptWithAES(note.noteContent)
+                    val pair = Pair(decryptedTitle, decryptedContent)
+                    
+                    // Ajouter au cache
+                    decryptionCache[note.idNote] = pair
+                    results[note.idNote] = pair
+                } catch (e: Exception) {
+                    println("Erreur lors du déchiffrement de la note ${note.idNote}: ${e.message}")
+                    results[note.idNote] = Pair("Erreur de déchiffrement", "")
+                }
+            }
+        }
+        
+        return results
     }
     
     /**

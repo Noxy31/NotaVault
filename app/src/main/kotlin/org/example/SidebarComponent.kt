@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.*
@@ -34,16 +36,18 @@ fun SidebarComponent(
     onGoToVault: () -> Unit,
     onLogout: () -> Unit,
     onColorFilterChange: (NoteColor?) -> Unit,
-    selectedColorFilter: NoteColor?,  // Ceci devrait être null par défaut dans MainScreen
+    selectedColorFilter: NoteColor?,
     colors: List<NoteColor>,
     noteRepository: NoteRepository
 ) {
+    // Utiliser des états mémorisés pour éviter des recréations inutiles
     var showColorPicker by remember { mutableStateOf(false) }
-    
-    // État pour contrôler l'onglet actif (Notes ou Coffre)
     var activeTab by remember { mutableStateOf("notes") }
     
-    // Assure que le filtre est initialement sur "Toutes les couleurs"
+    // Mémoriser les couleurs pour éviter un recalcul à chaque recomposition
+    val memorizedColors = remember { colors }
+    
+    // Assurer que le filtre est initialement sur "Toutes les couleurs"
     LaunchedEffect(Unit) {
         if (selectedColorFilter != null) {
             onColorFilterChange(null)
@@ -57,8 +61,10 @@ fun SidebarComponent(
             .background(Color(0xFF1A1A2E))
             .padding(vertical = 16.dp)
     ) {
-        // Profile section
-        ProfileSection(currentUser, onLogout)
+        // Profile section - mémorisée pour éviter les recompositions
+        key(currentUser.idUser) {
+            ProfileSection(currentUser, onLogout)
+        }
         
         Spacer(modifier = Modifier.height(16.dp))
         
@@ -90,7 +96,7 @@ fun SidebarComponent(
                     horizontalArrangement = Arrangement.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.List, // Utilisation de List qui est disponible
+                        imageVector = Icons.Default.List,
                         contentDescription = "Notes",
                         tint = Color.White
                     )
@@ -124,7 +130,7 @@ fun SidebarComponent(
                     horizontalArrangement = Arrangement.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Star, // Utilisation de Star qui est disponible
+                        imageVector = Icons.Default.Star,
                         contentDescription = "Coffre",
                         tint = Color.White
                     )
@@ -165,7 +171,7 @@ fun SidebarComponent(
             
             Spacer(modifier = Modifier.height(8.dp))
             
-            // Color filter
+            // Color filter - inchangé pour maintenir le comportement
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -230,8 +236,8 @@ fun SidebarComponent(
                         )
                     }
                     
-                    // Options pour chaque couleur
-                    colors.forEach { color ->
+                    // Options pour chaque couleur - utiliser la liste mémorisée
+                    memorizedColors.forEach { color ->
                         val isSelected = selectedColorFilter?.idColor == color.idColor
                         
                         Row(
@@ -244,10 +250,15 @@ fun SidebarComponent(
                                 .padding(vertical = 8.dp, horizontal = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            // Mémoriser la couleur pour éviter de recalculer à chaque recomposition
+                            val colorValue = remember(color.colorName) {
+                                getColorFromName(color.colorName)
+                            }
+                            
                             Box(
                                 modifier = Modifier
                                     .size(16.dp)
-                                    .background(getColorFromName(color.colorName), CircleShape)
+                                    .background(colorValue, CircleShape)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
@@ -269,10 +280,11 @@ fun SidebarComponent(
             
             Spacer(modifier = Modifier.height(16.dp))
             
-            // Notes list
+            // Notes list - utiliser LazyColumn pour optimiser les performances
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .weight(1f)
                     .padding(horizontal = 16.dp)
             ) {
                 Text(
@@ -282,23 +294,34 @@ fun SidebarComponent(
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
                 
-                notes.forEach { note ->
-                    val isSelected = note.idNote == selectedNoteId
-                    val (decryptedTitle, decryptedContent) = try {
-                        noteRepository.decryptNote(note) ?: Pair("", "")
-                    } catch (e: Exception) {
-                        Pair("Erreur de déchiffrement", "")
+                // Utiliser LazyColumn avec items keyed pour optimiser le rendu
+                LazyColumn {
+                    items(
+                        items = notes,
+                        key = { it.idNote }  // Utiliser l'ID comme clé pour le recyclage
+                    ) { note ->
+                        val isSelected = note.idNote == selectedNoteId
+                        
+                        // Mémoriser le résultat du déchiffrement pour éviter de le refaire
+                        // Utiliser la note.idNote comme clé pour invalider si la note change
+                        val decryptedPair = remember(note.idNote, note.noteUpdateDate) {
+                            try {
+                                noteRepository.decryptNote(note) ?: Pair("", "")
+                            } catch (e: Exception) {
+                                Pair("Erreur de déchiffrement", "")
+                            }
+                        }
+                        
+                        OptimizedNoteCard(
+                            note = note,
+                            decryptedTitle = decryptedPair.first,
+                            decryptedContent = decryptedPair.second,
+                            isSelected = isSelected,
+                            onClick = { onNoteSelected(note.idNote) }
+                        )
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
                     }
-                    
-                    NoteCard(
-                        note = note,
-                        decryptedTitle = decryptedTitle,
-                        decryptedContent = decryptedContent,
-                        isSelected = isSelected,
-                        onClick = { onNoteSelected(note.idNote) }
-                    )
-                    
-                    Spacer(modifier = Modifier.height(8.dp))
                 }
             }
         } else {
@@ -314,7 +337,7 @@ fun SidebarComponent(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Star, // Utilisation de Star à nouveau
+                        imageVector = Icons.Default.Star,
                         contentDescription = null,
                         tint = Color.White.copy(alpha = 0.5f),
                         modifier = Modifier.size(64.dp)
@@ -331,22 +354,36 @@ fun SidebarComponent(
     }
 }
 
+// Composant de carte de note optimisé
 @Composable
-fun NoteCard(
+fun OptimizedNoteCard(
     note: Note,
     decryptedTitle: String,
     decryptedContent: String,
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
-    // Obtenir la couleur de fond basée sur la couleur de la note
-    val noteColorValue = getColorFromName(note.color.colorName)
+    // Mémoriser la couleur pour éviter de recalculer à chaque recomposition
+    val noteColorValue = remember(note.color.colorName) {
+        getColorFromName(note.color.colorName)
+    }
     
     // Appliquer une version plus claire (ou désaturée) pour le fond
-    val backgroundColor = noteColorValue.copy(alpha = if (isSelected) 0.3f else 0.15f)
+    val backgroundColor = remember(noteColorValue, isSelected) {
+        noteColorValue.copy(alpha = if (isSelected) 0.3f else 0.15f)
+    }
     
     // Bordure de la couleur originale si sélectionnée
-    val borderColor = if (isSelected) noteColorValue else Color.Transparent
+    val borderColor = remember(noteColorValue, isSelected) {
+        if (isSelected) noteColorValue else Color.Transparent
+    }
+    
+    // Mémoriser la date formatée pour éviter de la reformater à chaque recomposition
+    val dateToShow = note.noteUpdateDate ?: note.noteCreationDate
+    val dateFormat = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
+    val formattedDate = remember(dateToShow) { 
+        dateFormat.format(Date.from(dateToShow.atZone(ZoneId.systemDefault()).toInstant()))
+    }
     
     Column(
         modifier = Modifier
@@ -389,13 +426,6 @@ fun NoteCard(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Affichage de la date
-            val dateToShow = note.noteUpdateDate ?: note.noteCreationDate
-            val dateFormat = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
-            val formattedDate = remember(dateToShow) { 
-                dateFormat.format(Date.from(dateToShow.atZone(ZoneId.systemDefault()).toInstant()))
-            }
-            
             Text(
                 text = formattedDate,
                 style = MaterialTheme.typography.caption,
@@ -405,8 +435,14 @@ fun NoteCard(
     }
 }
 
+// Composant de profil optimisé avec mémoisations
 @Composable
 fun ProfileSection(currentUser: User, onLogout: () -> Unit) {
+    // Mémoriser la première lettre du login pour l'avatar
+    val avatarLetter = remember(currentUser.userLogin) {
+        currentUser.userLogin.take(1).uppercase()
+    }
+    
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -425,7 +461,7 @@ fun ProfileSection(currentUser: User, onLogout: () -> Unit) {
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = currentUser.userLogin.take(1).uppercase(),
+                    text = avatarLetter,
                     color = Color.White
                 )
             }
@@ -462,7 +498,7 @@ fun ProfileSection(currentUser: User, onLogout: () -> Unit) {
     }
 }
 
-// Utilitaire pour obtenir une couleur basée sur son nom
+// Utilitaire pour obtenir une couleur basée sur son nom - inchangé
 fun getColorFromName(colorName: String): Color {
     return when (colorName.lowercase()) {
         "rouge" -> Color(0xFFE57373)
