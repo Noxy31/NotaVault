@@ -39,6 +39,21 @@ object Colors : Table<Color>("colors") {
     val colorHexa = varchar("color_hexa").bindTo { it.colorHexa }
 }
 
+// Entité Album
+interface Album : Entity<Album> {
+    companion object : Entity.Factory<Album>()
+    val idAlbum: Int
+    var albumName: String
+    var color: Color
+}
+
+// Table Ktorm pour Albums
+object Albums : Table<Album>("albums") {
+    val idAlbum = int("idAlbum").primaryKey().bindTo { it.idAlbum }
+    val albumName = varchar("album_name").bindTo { it.albumName }
+    val idColor = int("idColor").references(Colors) { it.color }
+}
+
 // Entité Note
 interface Note : Entity<Note> {
     companion object : Entity.Factory<Note>()
@@ -75,6 +90,7 @@ interface Image : Entity<Image> {
     var imageMimeType: String
     var imageCreationDate: LocalDateTime
     var user: User
+    var album: Album?
 }
 
 // Table Ktorm pour Images
@@ -87,4 +103,5 @@ object Images : Table<Image>("images") {
     val imageMimeType = varchar("image_mime_type").bindTo { it.imageMimeType }
     val imageCreationDate = datetime("image_creation_date").bindTo { it.imageCreationDate }
     val idUser = int("id_user").references(Users) { it.user }
+    val idAlbum = int("idAlbum").references(Albums) { it.album }
 }
