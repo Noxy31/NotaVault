@@ -63,15 +63,7 @@ fun NoteEditor(
             ) {
                 Column(
                     modifier = Modifier.padding(12.dp)
-                ) {
-                    // Titre du sélecteur
-                    Text(
-                        text = "Couleur:",
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                    
+                ) {     
                     // Affichage de la palette de couleurs
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),

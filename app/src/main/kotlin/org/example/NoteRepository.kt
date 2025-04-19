@@ -189,25 +189,27 @@ class NoteRepository {
     }
     
     /**
-     * Supprime une note (soft delete)
-     * @param noteId ID de la note à supprimer
-     * @return true si suppression réussie, false sinon
-     */
+    * Supprime une note (hard delete au lieu de soft delete)
+    * @param noteId ID de la note à supprimer
+    * @return true si suppression réussie, false sinon
+    */
     fun deleteNote(noteId: Int): Boolean {
         val db = Database.connect()
         
         try {
-            db.update(Notes) {
-                where { it.idNote eq noteId }
-                set(Notes.noteDeleteDate, LocalDateTime.now())
+            // Exécuter la requête DELETE
+            val deletedRows = db.delete(Notes) {
+                it.idNote eq noteId
             }
             
             // Retirer du cache
             decryptionCache.remove(noteId)
             
-            return true
+            // Si au moins une ligne a été supprimée, la suppression est réussie
+            return deletedRows > 0
         } catch (e: Exception) {
             println("Erreur lors de la suppression de la note: ${e.message}")
+            e.printStackTrace()
             return false
         }
     }
