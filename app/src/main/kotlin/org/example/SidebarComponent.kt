@@ -239,7 +239,7 @@ fun SidebarComponent(
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text("Rechercher dans les notes") },
+                placeholder = { Text("Rechercher..") },
                 leadingIcon = { 
                     Icon(
                         imageVector = Icons.Default.Search,
