@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +37,7 @@ fun NoteEditor(
     availableColors: List<NoteColor>,
     onColorChange: (NoteColor) -> Unit,
     onSave: () -> Unit,
+    onDelete: () -> Unit,  // Nouveau callback pour la suppression
     isSaving: Boolean
 ) {
     val focusRequester = remember { FocusRequester() }
@@ -100,29 +102,53 @@ fun NoteEditor(
                 }
             }
             
-            // Bouton de sauvegarde
-            Button(
-                onClick = onSave,
-                colors = ButtonDefaults.buttonColors(
-                    backgroundColor = MaterialTheme.colors.primary,
-                    contentColor = Color.White
-                ),
-                shape = RoundedCornerShape(8.dp),
-                enabled = !isSaving
+            // Zone des boutons d'action
+            Row(
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (isSaving) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        color = Color.White,
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    Text(
-                        text = "💾",  // Emoji disque
-                        fontSize = 16.sp
+                // Bouton de suppression
+                Button(
+                    onClick = onDelete,
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color.Red.copy(alpha = 0.8f),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.padding(end = 8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Supprimer",
+                        tint = Color.White
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Sauvegarder")
+                    Text("Supprimer")
+                }
+                
+                // Bouton de sauvegarde
+                Button(
+                    onClick = onSave,
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = MaterialTheme.colors.primary,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    enabled = !isSaving
+                ) {
+                    if (isSaving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text(
+                            text = "💾",  // Emoji disque
+                            fontSize = 16.sp
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Sauvegarder")
+                    }
                 }
             }
         }

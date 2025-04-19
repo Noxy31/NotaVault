@@ -365,35 +365,6 @@ fun MainScreen(
                                 Column(
                                     modifier = Modifier.fillMaxSize()
                                 ) {
-                                    // Ligne supérieure avec boutons d'actions
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                                        horizontalArrangement = Arrangement.End,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        // Bouton de suppression avec style d'alerte
-                                        Button(
-                                            onClick = { showDeleteConfirmDialog = true },
-                                            colors = ButtonDefaults.buttonColors(
-                                                backgroundColor = Color.Red.copy(alpha = 0.8f)
-                                            ),
-                                            modifier = Modifier.padding(end = 8.dp)
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Delete,
-                                                    contentDescription = "Supprimer",
-                                                    tint = Color.White
-                                                )
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Text("Supprimer")
-                                            }
-                                        }
-                                    }
                                     
                                     // Éditeur de note
                                     Box(
@@ -436,7 +407,7 @@ fun MainScreen(
                                                     triggerDebounceAutosave()
                                                 }
                                             },
-                                            noteColor = activeNoteColor, // Utiliser activeNoteColor au lieu de selectedNote?.color
+                                            noteColor = activeNoteColor,
                                             availableColors = availableColors,
                                             onColorChange = { newColor ->
                                                 // Mettre à jour immédiatement l'état local pour une UI réactive
@@ -475,6 +446,10 @@ fun MainScreen(
                                                         statusMessage = null
                                                     }
                                                 }
+                                            },
+                                            onDelete = {
+                                                // Ouvrir la boîte de dialogue de confirmation
+                                                showDeleteConfirmDialog = true
                                             },
                                             isSaving = isSaving
                                         )
