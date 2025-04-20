@@ -3,7 +3,6 @@ package org.example
 import org.example.entities.Image
 import org.example.entities.Images
 import org.example.entities.User
-import org.example.entities.Users
 import org.ktorm.entity.sequenceOf
 import org.ktorm.entity.toList
 import org.ktorm.entity.filter
@@ -18,7 +17,6 @@ import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import org.ktorm.dsl.*
 
-
 /**
  * Repository pour gérer les images du coffre-fort
  */
@@ -26,7 +24,7 @@ class ImageRepository {
     private var encryptionKey: String? = null
     
     // Au lieu de créer une nouvelle connexion, utilisez celle déjà configurée
-    private val database = Database.connect()
+    private val database = org.example.Database.connect()
     
     // Configuration de la taille des miniatures
     private val THUMBNAIL_WIDTH = 200
@@ -96,28 +94,29 @@ class ImageRepository {
         imageData: ByteArray,
         imageName: String,
         mimeType: String,
-        userId: Int
+        userId: Int,
+        albumId: Int? = null
     ): Int? {
         if (encryptionKey == null) {
             throw IllegalStateException("Clé de chiffrement non définie")
         }
         
         try {
-            // Créer une miniature
-            // val thumbnail = createThumbnail(imageData, mimeType)
-            
             // Chiffrer l'image
             val encryptedImage = CryptoUtils.encryptBinary(imageData, encryptionKey!!)
             
             // Insérer dans la base de données
             val generatedId = database.insertAndGenerateKey(Images) {
-                set(it.imageName, imageName)
-                set(it.imageData, encryptedImage.encryptedData)
-                set(it.imageSalt, encryptedImage.saltHex)
-                set(it.imageIv, encryptedImage.ivHex)
-                set(it.imageMimeType, mimeType)
-                set(it.imageCreationDate, LocalDateTime.now())
-                set(it.idUser, userId)
+                set(Images.imageName, imageName)
+                set(Images.imageData, encryptedImage.encryptedData)
+                set(Images.imageSalt, encryptedImage.saltHex)
+                set(Images.imageIv, encryptedImage.ivHex)
+                set(Images.imageMimeType, mimeType)
+                set(Images.imageCreationDate, LocalDateTime.now())
+                set(Images.idUser, userId)
+                if (albumId != null) {
+                    set(Images.idAlbum, albumId)
+                }
             } as Int?
             
             return generatedId
@@ -129,18 +128,24 @@ class ImageRepository {
     }
     
     /**
-     * Récupérer la liste des images du coffre pour un utilisateur
+     * Récupérer la liste des images du coffre pour un utilisateur,
+     * avec filtrage optionnel par album
      */
-      fun getUserImages(userId: Int): List<Image> {
+    fun getUserImages(userId: Int, albumId: Int? = null): List<Image> {
         if (encryptionKey == null) {
             throw IllegalStateException("Clé de chiffrement non définie")
         }
         
         try {
-            return database.sequenceOf(Images)
+            var query = database.sequenceOf(Images)
                 .filter { it.idUser eq userId }
-                .sortedByDescending { it.imageCreationDate }
-                .toList()
+            
+            // Si un albumId est spécifié, filtrer par cet album
+            if (albumId != null) {
+                query = query.filter { it.idAlbum eq albumId }
+            }
+            
+            return query.sortedByDescending { it.imageCreationDate }.toList()
         } catch (e: Exception) {
             println("Erreur lors de la récupération des images: ${e.message}")
             e.printStackTrace()
@@ -252,8 +257,8 @@ class ImageRepository {
     fun renameImage(imageId: Int, newName: String): Boolean {
         try {
             val affectedRows = database.update(Images) {
-                set(it.imageName, newName)
-                where { it.idImage eq imageId }
+                set(Images.imageName, newName)
+                where { Images.idImage eq imageId }
             }
             return affectedRows > 0
         } catch (e: Exception) {
@@ -262,5 +267,75 @@ class ImageRepository {
             return false
         }
     }
+    
+    /**
+     * Assigne une image à un album
+     */
+    fun assignImageToAlbum(imageId: Int, albumId: Int): Boolean {
+        try {
+            val affectedRows = database.update(Images) {
+                set(Images.idAlbum, albumId)
+                where { Images.idImage eq imageId }
+            }
+            return affectedRows > 0
+        } catch (e: Exception) {
+            println("Erreur lors de l'assignation de l'image à l'album: ${e.message}")
+            e.printStackTrace()
+            return false
+        }
+    }
+    
+    /**
+     * Retire une image d'un album (sans la supprimer)
+     */
+    fun removeImageFromAlbum(imageId: Int): Boolean {
+        try {
+            val affectedRows = database.update(Images) {
+                set(Images.idAlbum, null)
+                where { Images.idImage eq imageId }
+            }
+            return affectedRows > 0
+        } catch (e: Exception) {
+            println("Erreur lors du retrait de l'image de l'album: ${e.message}")
+            e.printStackTrace()
+            return false
+        }
+    }
+    
+    /**
+     * Récupérer la liste des images d'un utilisateur qui n'appartiennent à aucun album
+     */
+    fun getUserImagesWithoutAlbum(userId: Int): List<Image> {
+        if (encryptionKey == null) {
+            throw IllegalStateException("Clé de chiffrement non définie")
+        }
+        
+        try {
+            return database.sequenceOf(Images)
+                .filter { (it.idUser eq userId) and (it.idAlbum.isNull()) }
+                .sortedByDescending { it.imageCreationDate }
+                .toList()
+        } catch (e: Exception) {
+            println("Erreur lors de la récupération des images sans album: ${e.message}")
+            e.printStackTrace()
+            return emptyList()
+        }
+    }
+    
+    /**
+     * Déplace toutes les images d'un album vers un autre
+     */
+    fun moveImagesFromAlbumToAlbum(sourceAlbumId: Int, destinationAlbumId: Int?): Boolean {
+        try {
+            val affectedRows = database.update(Images) {
+                set(Images.idAlbum, destinationAlbumId)
+                where { Images.idAlbum eq sourceAlbumId }
+            }
+            return affectedRows > 0
+        } catch (e: Exception) {
+            println("Erreur lors du déplacement des images entre albums: ${e.message}")
+            e.printStackTrace()
+            return false
+        }
+    }
 }
-

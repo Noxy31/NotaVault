@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.List
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -41,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.*
+import org.example.entities.Album
 import org.example.entities.Image
 import org.example.entities.User
 import java.io.File
@@ -48,6 +50,7 @@ import javax.imageio.ImageIO
 import javax.swing.JFileChooser
 import javax.swing.filechooser.FileNameExtensionFilter
 import java.io.ByteArrayInputStream
+import org.jetbrains.skia.Image as SkiaImage
 
 /**
  * Écran du coffre-fort d'images
@@ -68,7 +71,11 @@ fun VaultScreen(
     
     // État pour l'image complète chargée (version déchiffrée)
     var fullImageData by remember { mutableStateOf<ByteArray?>(null) }
-    
+
+    // État pour le dialogue de déplacement vers un album
+    var showMoveToAlbumForImageDialog by remember { mutableStateOf(false) }
+    var imageToMove by remember { mutableStateOf<Image?>(null) }
+
     // États pour les dialogues
     var showImageDetail by remember { mutableStateOf(false) }
     var showAddImageDialog by remember { mutableStateOf(false) }
@@ -81,19 +88,32 @@ fun VaultScreen(
     // Nouveau nom pour le renommage
     var newImageName by remember { mutableStateOf("") }
     
+    // Nouvel état pour l'album actuellement sélectionné
+    var currentAlbum by remember { mutableStateOf<Album?>(null) }
+    
+    // Nouvel état pour les images sélectionnées
+    var selectedImages by remember { mutableStateOf<List<Image>>(emptyList()) }
+    
+    // État pour le mode sélection
+    var selectionMode by remember { mutableStateOf(false) }
+    
     // Fonction pour charger les images
     fun loadImages() {
         isLoading = true
         coroutineScope.launch {
             withContext(Dispatchers.IO) {
-                vaultImages = imageRepository.getUserImages(currentUser.idUser)
+                vaultImages = if (currentAlbum != null) {
+                    imageRepository.getUserImages(currentUser.idUser, currentAlbum?.idAlbum)
+                } else {
+                    imageRepository.getUserImages(currentUser.idUser)
+                }
             }
             isLoading = false
         }
     }
     
-    // Charger les images au démarrage
-    LaunchedEffect(Unit) {
+    // Charger les images au démarrage et quand l'album change
+    LaunchedEffect(currentAlbum) {
         loadImages()
     }
     
@@ -140,50 +160,26 @@ fun VaultScreen(
                     .fillMaxSize()
                     .padding(16.dp)
             ) {
-                // Barre d'en-tête
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Bouton retour
-                    IconButton(
-                        onClick = onBackToNotes,
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(Color(0xFF2A2A3A), CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "Retour aux notes",
-                            tint = Color.White
-                        )
-                    }
-                    
-                    // Titre
-                    Text(
-                        text = "Coffre d'images",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    
-                    // Bouton ajouter
-                    IconButton(
-                        onClick = { showAddImageDialog = true },
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(MaterialTheme.colors.primary, CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Ajouter une image",
-                            tint = Color.White
-                        )
-                    }
-                }
+                // Intégration de la TopBarComponent
+                TopBarComponent(
+                    currentUser = currentUser,
+                    vaultImages = vaultImages,
+                    selectedImages = selectedImages,
+                    onAddImageClick = { showAddImageDialog = true },
+                    onImagesSelected = { images ->
+                        selectedImages = images
+                    },
+                    onAlbumCreated = {
+                        // Recharger les images après la création d'un album
+                        loadImages()
+                    },
+                    onAlbumSelected = { album ->
+                        currentAlbum = album
+                        selectedImages = emptyList() // Réinitialiser la sélection lors du changement d'album
+                    },
+                    onBackToNotes = onBackToNotes,
+                    currentAlbum = currentAlbum
+                )
                 
                 // Grille d'images
                 if (isLoading) {
@@ -209,7 +205,7 @@ fun VaultScreen(
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
-                                text = "Aucune image dans le coffre",
+                                text = if (currentAlbum != null) "Aucune image dans cet album" else "Aucune image dans le coffre",
                                 color = Color.White.copy(alpha = 0.7f),
                                 fontSize = 18.sp,
                                 textAlign = TextAlign.Center
@@ -244,17 +240,29 @@ fun VaultScreen(
                             ImageCard(
                                 image = image,
                                 imageRepository = imageRepository,
+                                isSelectionMode = selectionMode,
+                                isSelected = selectedImages.contains(image),
                                 onClick = {
-                                    selectedImage = image
-                                    // Charger l'image complète
-                                    coroutineScope.launch {
-                                        isLoading = true
-                                        fullImageData = withContext(Dispatchers.IO) {
-                                            imageRepository.getImageData(image.idImage)
+                                    if (selectionMode) {
+                                        // En mode sélection, ajouter/retirer de la sélection
+                                        selectedImages = if (selectedImages.contains(image)) {
+                                            selectedImages - image
+                                        } else {
+                                            selectedImages + image
                                         }
-                                        isLoading = false
-                                        if (fullImageData != null) {
-                                            showImageDetail = true
+                                    } else {
+                                        // Mode normal, afficher l'image
+                                        selectedImage = image
+                                        // Charger l'image complète
+                                        coroutineScope.launch {
+                                            isLoading = true
+                                            fullImageData = withContext(Dispatchers.IO) {
+                                                imageRepository.getImageData(image.idImage)
+                                            }
+                                            isLoading = false
+                                            if (fullImageData != null) {
+                                                showImageDetail = true
+                                            }
                                         }
                                     }
                                 },
@@ -266,12 +274,17 @@ fun VaultScreen(
                                 onDelete = {
                                     selectedImage = image
                                     showDeleteConfirmDialog = true
+                                },
+                                onMoveToAlbum = {
+                                    selectedImage = image
+                                    showMoveToAlbumForImageDialog = true  // Utilisez la nouvelle variable
                                 }
                             )
                         }
                     }
                 }
             }
+            
             
             // Dialogue d'ajout d'image
             if (showAddImageDialog) {
@@ -316,7 +329,8 @@ fun VaultScreen(
                                                         imageData = imageBytes,
                                                         imageName = selectedFile.name,
                                                         mimeType = mimeType,
-                                                        userId = currentUser.idUser
+                                                        userId = currentUser.idUser,
+                                                        albumId = currentAlbum?.idAlbum
                                                     )
                                                     
                                                     // Recharger les images
@@ -363,40 +377,176 @@ fun VaultScreen(
             
             // Dialogue de détail d'image
             if (showImageDetail && selectedImage != null) {
-    Dialog(
-        onDismissRequest = { 
-            showImageDetail = false
-            fullImageData = null 
-        },
-        properties = DialogProperties(
-            dismissOnBackPress = true,
-            dismissOnClickOutside = false,
-            usePlatformDefaultWidth = false // Permet d'avoir un dialogue en plein écran
-        )
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.9f)
-                .fillMaxHeight(0.9f)
-                .clip(RoundedCornerShape(16.dp))
-                .background(Color(0xFF2A2A3A))
-        ) {
-            EnhancedImageViewer(
-                currentImage = selectedImage!!,
-                allImages = vaultImages,
-                imageRepository = imageRepository,
-                onClose = {
-                    showImageDetail = false
-                    fullImageData = null
-                },
-                onImageChange = { newImage ->
-                    selectedImage = newImage
-                    // La récupération des données se fait dans EnhancedImageViewer
+                Dialog(
+                    onDismissRequest = { 
+                        showImageDetail = false
+                        fullImageData = null 
+                    },
+                    properties = DialogProperties(
+                        dismissOnBackPress = true,
+                        dismissOnClickOutside = false,
+                        usePlatformDefaultWidth = false // Permet d'avoir un dialogue en plein écran
+                    )
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.9f)
+                            .fillMaxHeight(0.9f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFF2A2A3A))
+                    ) {
+                        EnhancedImageViewer(
+                            currentImage = selectedImage!!,
+                            allImages = vaultImages,
+                            imageRepository = imageRepository,
+                            onClose = {
+                                showImageDetail = false
+                                fullImageData = null
+                            },
+                            onImageChange = { newImage ->
+                                selectedImage = newImage
+                                // La récupération des données se fait dans EnhancedImageViewer
+                            }
+                        )
+                    }
                 }
-            )
-        }
-    }
-}
+            }
+            // Dialogue pour déplacer une image vers un album
+            if (showMoveToAlbumForImageDialog && selectedImage != null) {
+                val albumRepository = remember { AlbumRepository() }
+                var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
+                
+                // Charger les albums
+                LaunchedEffect(Unit) {
+                    withContext(Dispatchers.IO) {
+                        albums = albumRepository.getUserAlbums(currentUser.idUser)
+                    }
+                }
+                
+                Dialog(onDismissRequest = { showMoveToAlbumForImageDialog = false }) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        backgroundColor = Color(0xFF2A2A3A)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .padding(16.dp)
+                                .fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "Déplacer vers un album",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                modifier = Modifier.padding(bottom = 16.dp)
+                            )
+                            
+                            if (albums.isEmpty()) {
+                                Text(
+                                    text = "Aucun album disponible. Créez un album d'abord.",
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    modifier = Modifier.padding(bottom = 16.dp)
+                                )
+                            } else {
+                                // Liste des albums disponibles
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f)
+                                ) {
+                                    // Option pour retirer de l'album
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                coroutineScope.launch {
+                                                    withContext(Dispatchers.IO) {
+                                                        imageRepository.removeImageFromAlbum(selectedImage!!.idImage)
+                                                    }
+                                                    loadImages()
+                                                    showMoveToAlbumForImageDialog = false
+                                                }
+                                            }
+                                            .padding(vertical = 12.dp, horizontal = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFF757575))
+                                        )
+                                        
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        
+                                        Text(
+                                            text = "Aucun album (retirer de l'album)",
+                                            color = Color.White,
+                                            fontSize = 16.sp
+                                        )
+                                    }
+                                    
+                                    Divider(color = Color.Gray.copy(alpha = 0.3f), thickness = 1.dp)
+                                    
+                                    // Liste des albums
+                                    for (album in albums) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    coroutineScope.launch {
+                                                        withContext(Dispatchers.IO) {
+                                                            imageRepository.assignImageToAlbum(selectedImage!!.idImage, album.idAlbum)
+                                                        }
+                                                        loadImages()
+                                                        showMoveToAlbumForImageDialog = false
+                                                    }
+                                                }
+                                                .padding(vertical = 12.dp, horizontal = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(24.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(parseColor(album.color.colorHexa)))
+                                            )
+                                            
+                                            Spacer(modifier = Modifier.width(16.dp))
+                                            
+                                            Text(
+                                                text = album.albumName,
+                                                color = Color.White,
+                                                fontSize = 16.sp
+                                            )
+                                        }
+                                        Divider(color = Color.Gray.copy(alpha = 0.3f), thickness = 1.dp)
+                                    }
+                                }
+                            }
+                            
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                TextButton(
+                                    onClick = { showMoveToAlbumForImageDialog = false }
+                                ) {
+                                    Text(
+                                        text = "Annuler",
+                                        color = Color.White.copy(alpha = 0.7f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             
             // Dialogue de renommage
             if (showRenameDialog && selectedImage != null) {
@@ -543,7 +693,6 @@ fun VaultScreen(
                             Text(
                                 text = "Cette action est irréversible et l'image sera perdue définitivement.",
                                 color = Color(0xFFF44336),
-                                // Remplacer FontStyle.Italic par une solution qui ne nécessite pas d'import supplémentaire
                                 fontWeight = FontWeight.Light,
                                 modifier = Modifier.padding(bottom = 16.dp)
                             )
@@ -553,10 +702,9 @@ fun VaultScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.End
                             ) {
-                                // Bouton Annuler plus visible - sans BorderStroke
+                                // Bouton Annuler plus visible
                                 OutlinedButton(
                                     onClick = { showDeleteConfirmDialog = false },
-                                    // Suppression de border = BorderStroke()
                                     colors = ButtonDefaults.outlinedButtonColors(
                                         backgroundColor = Color.Transparent,
                                         contentColor = Color.White
@@ -611,9 +759,12 @@ fun VaultScreen(
 fun ImageCard(
     image: Image,
     imageRepository: ImageRepository,
+    isSelectionMode: Boolean,
+    isSelected: Boolean,
     onClick: () -> Unit,
     onRename: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onMoveToAlbum: () -> Unit
 ) {
     // État pour la miniature bitmap
     var thumbnailData by remember { mutableStateOf<ByteArray?>(null) }
@@ -661,6 +812,45 @@ fun ImageCard(
                         fontSize = 32.sp,
                         color = Color.White.copy(alpha = 0.5f)
                     )
+                }
+            }
+            
+            // Indicateur d'album (uniquement si l'image est dans un album)
+            if (image.album != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clip(CircleShape)
+                            .background(Color(parseColor(image.album!!.color.colorHexa)))
+                    )
+                }
+            }
+            
+            // Indicateur de sélection (uniquement en mode sélection)
+            if (isSelectionMode) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .background(Color(0xAA000000), CircleShape)
+                            .padding(4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isSelected) Icons.Default.Star else Icons.Default.Add,
+                            contentDescription = if (isSelected) "Sélectionné" else "Non sélectionné",
+                            tint = if (isSelected) MaterialTheme.colors.primary else Color.White
+                        )
+                    }
                 }
             }
             
@@ -725,6 +915,27 @@ fun ImageCard(
                         .background(Color(0xFF2A2A3A))
                         .width(180.dp)
                 ) {
+                    // Option Déplacer vers un album
+                    DropdownMenuItem(
+                        onClick = {
+                            onMoveToAlbum()
+                            showMenu = false
+                        }
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = null,
+                                tint = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Déplacer vers un album",
+                                color = Color.White
+                            )
+                        }
+                    }
+                    
                     // Option Renommer
                     DropdownMenuItem(
                         onClick = {
